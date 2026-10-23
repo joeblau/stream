@@ -10,4 +10,13 @@ One local invocation compiled successfully and passed all 40 cases on macOS 27.2
 
 Run the unchanged matrix with `python3 scripts/test_studio_control_rows.py` from `apple`. Durable results are retained under `apple/build/studio-control-rows-validation/artifacts/invocation-UUID`, including source snapshots and hashes, generated Swift, binary, compile/runtime logs, `result.json` and `failed-phase.json`. An optional `--artifact-dir NEW_PATH` selects a fresh owned destination. Child output goes directly to a file; CI echo occurs after the child completes. Failure and timeout metadata are written in `finally`.
 
-The dated JSON receipt binds the original Intel log and this first local outcome. Hosted Intel evidence remains pending. This component-layout fixture does not qualify the full workspace, accessibility delivery, focus, visual contrast, media or devices.
+The first diagnostic-source hosted workflow, run `39875859848` at published `d0ec6ff952052ce0e66c17acb247702f065d8dfd`, passed all 40 unchanged cases on ARM and all 40 on Intel: 80 component cases in total. Both hosts compiled the exact published fixture, control row and text-style sources and retained the complete generated source and result artifacts. No second hosted invocation was made.
+
+| Host | OS | Compile | Runtime | Public preferred-style notification | First owned style assignment |
+| --- | --- | --- | --- | --- | --- |
+| ARM | 26.6.2, build 25G83 | 13.483s | 21.867s | Overlay to legacy at uptime 396.756121s | Overlay at 396.843001s |
+| Intel | 26.6.1, build 25G76 | 14.224s | 22.871s | Overlay to legacy at uptime 954.049250s | Overlay at 954.197602s |
+
+Both notifications arrived during the first 11-point transport case, before its owned style assignment. Each host retained the same live scroll and document identities across 280 layout observations, with no style mismatch after assignment. Every observed window remained hidden and non-key. `NSApp.isRunning` remained false, and no finished-launching notification was observed. Compile and runtime stayed within the original 60/90-second bounds. This demonstrates successful bounded component layout on both hosts; the notification ordering does not establish why the original 50084bb Intel case failed. No startup or production change is justified by these results.
+
+The dated JSON receipt preserves every original local-stage field and adds hosted source, result, log and archive hashes, exact per-host notification ordering and all ten retained archive-entry hashes. Its historical local `pendingGate` is superseded by the hosted evidence section. The original Intel failure and its unknown cause remain preserved. No further unchanged run is indicated. This component-layout fixture does not qualify the full workspace, accessibility delivery, focus, visual contrast, media or devices.
