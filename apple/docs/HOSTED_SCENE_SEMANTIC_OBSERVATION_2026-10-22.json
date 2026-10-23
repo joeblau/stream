@@ -1,0 +1,442 @@
+{
+  "schemaVersion": 1,
+  "issue": 90,
+  "fullyQualified": false,
+  "closureDecision": "Keep open",
+  "publishedHead": "9f9f6bc6f4aa81c4ba1d0e92e096047741d9bfb7",
+  "workflow": ".github/workflows/native-scene-semantics.yml",
+  "run": 39883148106,
+  "runURL": "https://github.com/joeblau/stream/actions/runs/39883148106",
+  "job": 120185019867,
+  "event": "workflow_dispatch",
+  "jobConclusion": "failure",
+  "runtimeExitCode": 77,
+  "overallOutcome": "UNQUALIFIED keyboard delivery after passed component AX oracles",
+  "completedAtUTC": "2026-10-23T01:17:49.083089Z",
+  "dispatchCount": 1,
+  "reruns": 0,
+  "publishedSourceSHA256": {
+    ".github/workflows/native-scene-semantics.yml": "45e711369e388b8a6bfeafe370398478dbc00d4f7fa5d17bab7b794a0471278c",
+    "apple/docs/SCENE_SEMANTIC_OBSERVATION.md": "c3954f34b61c537caee4f359a5788a1eda1f1f5310911d03e266a3ed108bad2e",
+    "apple/StreamMac/SceneSelectionButton.swift": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5",
+    "apple/scripts/scene_selection_native_harness.swift": "c3dd6871f5d14c7b8714c53489a23c19daf831232548ebde337223c8976b7671",
+    "apple/scripts/scene_selection_ax_bridge.m": "c6d03045b9f50b0ea07dd871bbb539e6c2b69fa434a2750230d3002366e80934",
+    "apple/scripts/scene_selection_ax_bridge.h": "dafc5fe30ead385034170129b213ffb3fe1fafe89d35bcbe2f5a39b2b5d3a803",
+    "apple/scripts/run_scene_selection_native_harness.zsh": "608075ca698eceea506869d574ee674871ad0081362073d6d2f24901790eb5f8"
+  },
+  "actualCompileInputSnapshots": {
+    "/Users/runner/work/stream/stream/apple/StreamMac/SceneSelectionButton.swift": {
+      "snapshot": "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/sources/SceneSelectionButton.swift",
+      "sha256": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5"
+    },
+    "/Users/runner/work/stream/stream/apple/scripts/scene_selection_native_harness.swift": {
+      "snapshot": "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/sources/scene_selection_native_harness.swift",
+      "sha256": "c3dd6871f5d14c7b8714c53489a23c19daf831232548ebde337223c8976b7671"
+    },
+    "/Users/runner/work/stream/stream/apple/scripts/scene_selection_ax_bridge.m": {
+      "snapshot": "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/sources/scene_selection_ax_bridge.m",
+      "sha256": "c6d03045b9f50b0ea07dd871bbb539e6c2b69fa434a2750230d3002366e80934"
+    },
+    "/Users/runner/work/stream/stream/apple/scripts/scene_selection_ax_bridge.h": {
+      "snapshot": "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/sources/scene_selection_ax_bridge.h",
+      "sha256": "dafc5fe30ead385034170129b213ffb3fe1fafe89d35bcbe2f5a39b2b5d3a803"
+    },
+    "/Users/runner/work/stream/stream/apple/scripts/run_scene_selection_native_harness.zsh": {
+      "snapshot": "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/sources/run_scene_selection_native_harness.zsh",
+      "sha256": "608075ca698eceea506869d574ee674871ad0081362073d6d2f24901790eb5f8"
+    }
+  },
+  "checks": [
+    {
+      "label": "bridge",
+      "command": [
+        "xcrun",
+        "clang",
+        "-fobjc-arc",
+        "-c",
+        "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/sources/scene_selection_ax_bridge.m",
+        "-o",
+        "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/bridge.o"
+      ],
+      "pid": 1185,
+      "exit": 0,
+      "log": "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/bridge.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "swift",
+      "command": [
+        "xcrun",
+        "swiftc",
+        "-j2",
+        "-swift-version",
+        "6",
+        "-strict-concurrency=complete",
+        "-parse-as-library",
+        "-import-objc-header",
+        "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/sources/scene_selection_ax_bridge.h",
+        "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/sources/SceneSelectionButton.swift",
+        "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/sources/scene_selection_native_harness.swift",
+        "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/bridge.o",
+        "-o",
+        "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/OwnedSceneSemanticBaseline.app/Contents/MacOS/harness"
+      ],
+      "pid": 1195,
+      "exit": 0,
+      "log": "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/swift.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "runtime",
+      "command": [
+        "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/OwnedSceneSemanticBaseline.app/Contents/MacOS/harness",
+        "--public-cax-child"
+      ],
+      "pid": 1258,
+      "exit": 77,
+      "log": "/Users/runner/work/stream/stream/apple/build/scene-selection-semantics/39883148106-1/runtime.log",
+      "sha256": "b72763fd5405badfcc47327f3b5af672ca3293e255bd9b02dbed7e6ad03e2da1"
+    }
+  ],
+  "environment": {
+    "actualSourceHead": "9f9f6bc6f4aa81c4ba1d0e92e096047741d9bfb7",
+    "toolchainLog": "ProductName:\t\tmacOS\nProductVersion:\t\t26.6.2\nBuildVersion:\t\t25G83\nXcode 26.6\nBuild version 17F113\nApple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)\nTarget: arm64-apple-macosx26.0\narm64\n",
+    "runnerArtifactDirectory": "build/scene-selection-semantics/39883148106-1",
+    "command": "zsh scripts/run_scene_selection_native_harness.zsh --owned-bundle --public-cax-child",
+    "limitsSeconds": {
+      "bridgeCompile": 120,
+      "swiftCompile": 120,
+      "runtime": 30
+    }
+  },
+  "publicCapabilityFacts": {
+    "applicationActive": false,
+    "AXTrusted": true,
+    "lockState": "unknown: no public supported lock-state read used",
+    "onConsole": true,
+    "sessionPresent": true,
+    "windowKey": false,
+    "windowVisible": true
+  },
+  "ownedWindowBaseline": {
+    "role": "AXWindow",
+    "ownerIsTarget": true,
+    "actualAndExpectedFramePoints": [
+      350,
+      282
+    ],
+    "baselineTreeComplete": true,
+    "baselineNodes": 11,
+    "sceneActionTreeComplete": true,
+    "sceneActionNodes": 12,
+    "childTrusted": true
+  },
+  "actualOracles": {
+    "stockSwiftUIButton": {
+      "role": "AXButton",
+      "label": "Owned SwiftUI baseline",
+      "externalAXPressResult": 0,
+      "observedCallbacks": 1,
+      "status": "passed"
+    },
+    "appKitButtonExternalCAX": {
+      "role": "AXButton",
+      "label": "Owned AppKit positive control",
+      "externalAXPressResult": 0,
+      "observedBridgeCallbacks": 1,
+      "status": "passed"
+    },
+    "appKitButtonDirectInProcess": {
+      "role": "AXUnknown",
+      "accessibilityPerformPressReturned": false,
+      "observedDirectCallbacks": 1,
+      "interpretation": "Separate in-process selector observation; it does not replace or invalidate the passed external CAX AXButton/AXPress/callback baseline."
+    },
+    "productionSceneSelectionButton": {
+      "namedAXButtonCount": 2,
+      "initialSceneOneValue": "Selected, Preview, Unpublished changes",
+      "initialSceneTwoValue": "Not selected, Program, Locked",
+      "sceneTwoExternalAXPressResult": 0,
+      "selectedStateAfterPress": 2,
+      "observedCallbackSequenceAfterPress": [
+        2
+      ],
+      "status": "passed actual component role/labels/initial value and AXPress callback; no full studio or dispatcher claim"
+    },
+    "keyboard": {
+      "events": "Owned window-local Space, then Tab, then Space",
+      "requiredSuffix": [
+        1,
+        2
+      ],
+      "actualCallbackSequence": [
+        2
+      ],
+      "windowKey": false,
+      "applicationActive": false,
+      "status": "unqualified",
+      "interpretation": "The unchanged key-routing oracle was not met. Non-key/inactive delivery cannot be separated from component behavior; no control defect or lock cause inferred."
+    }
+  },
+  "pressArtifactScope": {
+    "public-press-status.json": "Written before production scene action; contains baseline statuses only.",
+    "child-scene-action.json": "Contains the separate successful scene-two AXPress result."
+  },
+  "baselineRows": [
+    {
+      "role": "AXWindow",
+      "label": "Owned scene selection semantics",
+      "value": ""
+    },
+    {
+      "role": "AXGroup",
+      "value": "",
+      "label": ""
+    },
+    {
+      "role": "AXButton",
+      "label": "Owned AppKit positive control",
+      "value": ""
+    },
+    {
+      "label": "",
+      "role": "AXButton",
+      "value": ""
+    },
+    {
+      "value": "",
+      "role": "AXButton",
+      "label": ""
+    },
+    {
+      "label": "",
+      "role": "AXButton",
+      "value": ""
+    },
+    {
+      "role": "AXStaticText",
+      "value": "Owned scene selection semantics",
+      "label": ""
+    },
+    {
+      "role": "AXButton",
+      "value": "Selected, Preview, Unpublished changes",
+      "label": "Select scene Owned scene 1"
+    },
+    {
+      "role": "AXButton",
+      "value": "Not selected, Program, Locked",
+      "label": "Select scene Owned scene 2"
+    },
+    {
+      "role": "AXButton",
+      "value": "",
+      "label": "Owned SwiftUI baseline"
+    },
+    {
+      "role": "AXGroup",
+      "value": "",
+      "label": ""
+    }
+  ],
+  "sceneActionRowsBeforePress": [
+    {
+      "role": "AXWindow",
+      "value": "",
+      "label": "Owned scene selection semantics"
+    },
+    {
+      "value": "",
+      "label": "",
+      "role": "AXGroup"
+    },
+    {
+      "value": "",
+      "role": "AXButton",
+      "label": "Owned AppKit positive control"
+    },
+    {
+      "value": "",
+      "role": "AXButton",
+      "label": ""
+    },
+    {
+      "role": "AXButton",
+      "label": "",
+      "value": ""
+    },
+    {
+      "label": "",
+      "role": "AXButton",
+      "value": ""
+    },
+    {
+      "role": "AXStaticText",
+      "label": "",
+      "value": "Owned scene selection semantics"
+    },
+    {
+      "label": "Select scene Owned scene 1",
+      "role": "AXButton",
+      "value": "Selected, Preview, Unpublished changes"
+    },
+    {
+      "label": "Select scene Owned scene 2",
+      "role": "AXButton",
+      "value": "Not selected, Program, Locked"
+    },
+    {
+      "label": "Owned SwiftUI baseline",
+      "role": "AXButton",
+      "value": ""
+    },
+    {
+      "label": "",
+      "value": "",
+      "role": "AXGroup"
+    },
+    {
+      "label": "",
+      "value": "",
+      "role": "AXGroup"
+    }
+  ],
+  "rawRuntime": "External owned C AX observation: clientTrusted=true; ownWindow=true; AppKitTitle=Owned scene selection semantics; candidates=[[\"title\": \"Owned scene selection semantics\", \"roleOwnershipAndSizeMatch\": \"true\", \"size\": \"(350.0, 282.0)\", \"role\": \"AXWindow\", \"titleCFType\": \"Optional(CFString)\", \"expectedHostSize\": \"(350.0, 282.0)\", \"ownerIsTarget\": \"true\"]]; nodes=11; remaining=0; budgetExpired=false; optionalAttributeErrors=[\"AXDescription=-25205\", \"AXValue=-25205\", \"AXTitle=-25205\", \"AXDescription=-25205\", \"AXValue=-25205\", \"AXValue=-25205\", \"AXChildren=-25212\", \"AXTitle=-25212\", \"AXDescription=-25205\", \"AXValue=-25205\", \"AXChildren=-25212\", \"AXTitle=-25212\", \"AXDescription=-25205\", \"AXValue=-25205\", \"AXTitle=-25212\", \"AXDescription=-25205\"]\nPublic capability facts: [\"onConsole\": true, \"windowVisible\": true, \"applicationActive\": false, \"sessionPresent\": true, \"lockState\": \"unknown: no public supported lock-state read used\", \"AXTrusted\": true, \"windowKey\": false]\nActual genuine stock SwiftUI baseline buttons=1, press=true, callbacks=1\nActual native control role=AXUnknown, label=Owned AppKit positive control, bridgePress=true, bridgeCallbacks=1, directPress=false, directCallbacks=1\nPASS genuine stock SwiftUI baseline role, label and actual accessibilityPerformPress callback\nActual in-process public AX nodes=11, named scene buttons=2\nPASS actual semantic scene button label/value/role and accessibilityPerformPress callback\nUNQUALIFIED: local key routing did not meet the unchanged callback oracle while the owned host is non-key or inactive; no control-defect or lock attribution. callbacks=[2]\n",
+  "originalLog": {
+    "path": "/tmp/stream-scene-semantics-9f9f6bc-120185019867-original.log",
+    "bytes": 16968,
+    "sha256": "36d5424ebf6b3a6268b1fd619d76abaae17686396daf2143c19788aea640e4b9"
+  },
+  "originalArchive": {
+    "id": 12471451789,
+    "path": "/tmp/stream-scene-semantics-9f9f6bc-artifact12471451789-original.zip",
+    "bytes": 156846,
+    "sha256": "04d7c64e8b785f5f0313c8d7eafa3c0c0b2bd050858cf129ad8480d05a600ef2",
+    "metadata": "/tmp/stream-scene-semantics-9f9f6bc-artifact12471451789-metadata",
+    "manifest": "/tmp/stream-scene-semantics-9f9f6bc-artifact12471451789-metadata-manifest.json"
+  },
+  "archiveEntries": [
+    {
+      "path": "scene-selection-semantics-environment/source-head.txt",
+      "bytes": 41,
+      "sha256": "4831fd849e93427e162f7b4afe79373f3e9b44ba18656f796a878be2786669bb"
+    },
+    {
+      "path": "scene-selection-semantics-environment/toolchain.log",
+      "bytes": 201,
+      "sha256": "b96c65ef1c8fdebca3031fe3048b860948086824093f1788f14296b14af7c177"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/OwnedSceneSemanticBaseline.app/Contents/Info.plist",
+      "bytes": 762,
+      "sha256": "892a964997e1e7177719a8f4c7e5b857dcf0e6f4ec95228081c58414b058a92f"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/OwnedSceneSemanticBaseline.app/Contents/MacOS/harness",
+      "bytes": 437688,
+      "sha256": "076a7bd668ede50455b1bb2f96c6ba6fa52483a62f9d3fc4ec2bdbcb65f78422"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/bridge.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/bridge.o",
+      "bytes": 15056,
+      "sha256": "e4e74a5d28a167a507e680f56a7bca1dfdf65c339101496a18aaa6fcc69d1e27"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/child-baseline.json",
+      "bytes": 1584,
+      "sha256": "5a8e445d402eb0b92efcb34724d3424adf9dec273791bebce5d2ace5a6347487"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/child-baseline.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/child-scene-action.json",
+      "bytes": 1595,
+      "sha256": "81f666d80e018064104f7191adac33ca6ce5de662acc228060ecfb0d094848e1"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/child-scene-action.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/native-nodes.json",
+      "bytes": 697,
+      "sha256": "3c1be10eec41e5bfbe39f5ea17b7357c9c22e33386d739d69ce88ca12d95c85c"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/public-capabilities.json",
+      "bytes": 186,
+      "sha256": "83316d7c44c9180a35f0e5b7200228c24cc93e7b8f618bd92c801552f5661b18"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/public-press-status.json",
+      "bytes": 62,
+      "sha256": "a2ee98f6724d419f62204176fd1ba91db5fef59ac54eec5b919e069b5c43267e"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/receipt.json",
+      "bytes": 7932,
+      "sha256": "da5a0ac28505df3997c87e0970cab2a202ffd163ea5bdfd8a54d7231c1423c1f"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/runtime.log",
+      "bytes": 1612,
+      "sha256": "b72763fd5405badfcc47327f3b5af672ca3293e255bd9b02dbed7e6ad03e2da1"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/sources/SceneSelectionButton.swift",
+      "bytes": 1077,
+      "sha256": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/sources/run_scene_selection_native_harness.zsh",
+      "bytes": 3477,
+      "sha256": "608075ca698eceea506869d574ee674871ad0081362073d6d2f24901790eb5f8"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/sources/scene_selection_ax_bridge.h",
+      "bytes": 194,
+      "sha256": "dafc5fe30ead385034170129b213ffb3fe1fafe89d35bcbe2f5a39b2b5d3a803"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/sources/scene_selection_ax_bridge.m",
+      "bytes": 4892,
+      "sha256": "c6d03045b9f50b0ea07dd871bbb539e6c2b69fa434a2750230d3002366e80934"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/sources/scene_selection_native_harness.swift",
+      "bytes": 20449,
+      "sha256": "c3dd6871f5d14c7b8714c53489a23c19daf831232548ebde337223c8976b7671"
+    },
+    {
+      "path": "scene-selection-semantics/39883148106-1/swift.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "ownerTerminalReport": {
+    "path": "/tmp/stream-scene-semantics-9f9f6bc-terminal-report-20261022.json",
+    "sha256": "3df6872c3a4f1c57b1e66448ede40df45338ff6763493f862a8ac1627d1ee15e"
+  },
+  "independentReview": {
+    "path": "/tmp/stream-hosted-scene-9f9f6bc-independent-review-20261022.json",
+    "sha256": "2537705a399617c826c1159590d73b7efcbf284db5567d3189ca4ffafd614efb",
+    "checks": 46,
+    "execution": "Read-only original source/archive/log/hash inspection; no native execution."
+  },
+  "preservedLocalHistory": {
+    "receipt": "apple/docs/SCENE_SEMANTIC_OBSERVATION_2026-10-22.json",
+    "sha256": "1b280c68bdfa94bb491c3c5337462636a8fd3b0d333baf4e5a5c61af70c67e2d",
+    "nineOutcomesUnchanged": true
+  },
+  "scope": "First isolated hosted ARM macOS26 component observation only. No full keyboard, VoiceOver, studio table/slider/layer/focus/layout or #90 completion. No new observer, retry, trust request, settings/VoiceOver change, global HID, other-app query, capture/device graph or production change. Lock state remains unknown.",
+  "remainingOriginalAcceptance": "Broader original #90 labels/actions/order, keyboard traversal, accessible sliders/tables/layer controls, focus during updates and after panel/sheet changes, smaller layouts and project validation remain outside this component result."
+}
