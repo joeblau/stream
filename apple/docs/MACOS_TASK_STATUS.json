@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Original 61 macOS issues: 27 closed / 34 open (23 features / 11 trackers). Fresh complete read-only inventory at 2026-10-22T23:36:16Z accounts for all 135 macOS issues: 101 closed / 34 open; zero open PRs or outside-inventory open issues. All original bodies/states unchanged; no new closure.",
+  "scope": "Original 61 macOS issues: 27 closed / 34 open (23 features / 11 trackers). Complete read-only audit at 2026-10-22T23:59:12.588884+00:00 finds all 135 macOS issues: 101 closed / 34 open, unchanged original bodies/states and zero open PRs or outside-inventory open issues. No closure is justified.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -17,8 +17,8 @@
     "signing": "Read-only inventory:3 valid signing identities (1 Developer ID Application, 2 Apple Development); 5 macOS profiles, none authorizing the declared shared browser App Group for host/helper. Two iOS profiles contain that group. No positive provisioned macOS shared-container launch, Developer ID distribution artifact, notarization or extension/driver installation is claimed; no profiles/identities/containers changed."
   },
   "validation": {
-    "sharedCore": "Shipping Core is unchanged from published 50084bb through 7fbe42d. Exact 500 ARM passes 613 tests across 84 suites in 84.165 seconds before the old PCM fixture fails in step 10; iOS passes 613/84 in 234.930 seconds. Intel remains active in step 9. Original e41 is terminal: both Mac jobs fail later native fixtures despite Core 609/83 PASS in 114.954/320.143 seconds; iOS 609/83 PASS in 190.578 seconds. These named Core successes do not imply whole native CI success.",
-    "shippingApp": "Exact 57c0f25 generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS. Current 7fbe42d manifest verifies all 840 selected paths and vendor. Exactly three later recipes differ: CI adds three bounded JSON artifact paths, PCM Swift fixture and runner change. Shipping app/Core/vendor inputs remain identical to the successful build. Not all 840 inputs are claimed identical to that built tree; no second app build performed for fixture-only changes.",
+    "sharedCore": "Core source is unchanged in this cohort. Exact 500 passes 613 tests across 84 suites on ARM in 84.165 seconds, Intel in 240.447 seconds and iOS in 234.930 seconds; both Mac jobs subsequently fail step 10. Intel PCM passes before the native row style assertion fails; ARM PCM full-horizon expiry failure is separate. Exact 990 native CI remains active at 2026-10-23T00:00:14.781567+00:00: iOS passes 613 tests across 84 suites in 237.338 seconds; both Mac jobs are active. No whole-run conclusion is asserted.",
+    "shippingApp": "Actual 57c0f25 generation, unsigned universal arm64/x86_64 Release and bundle audit PASS is reused: all shipping app/Core/vendor inputs remain identical. Current 69210da manifest verifies 841 selected paths. Five later validation recipes differ from the built tree: CI, both PCM fixture files, row diagnostic fixture and new manual workflow. Relative to published 990, only CI and the row fixture change among the previous 840 paths, with one added workflow. No new app build or claim that all 841 hashes equal the old build.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
@@ -28,9 +28,9 @@
     "controllers": "Post-merge actual local control and six native shortcut/palette/window-readiness groups pass: real key dispatch and catalog, binding persistence/conflicts/repeats, text/button focus, attached sheets, palette navigation/focus restoration, unrelated-window isolation, studio identity/reopen and uninstall. Actual global modal-only Carbon/AppKit check passes. Stream Deck typecheck and all 10 tests pass. Earlier native MIDI/OSC/macros, universal helper and official packaging pass; physical controller/keyboard and signed pairing remain unqualified.",
     "nativeInterviewProgramISO": "Actual manager/default native receiver through local TURN/Chrome decoded Program and guest ISO: 316946/294390 identical Float32 values, zero rational cue difference/history misses; separate screen approval/stop and Backstage privacy pass",
     "guestPrivateMessages": "Actual shipping dispatcher/manager/default receiver through local TURN/Chrome passes both directions/receipts, private Backstage routes, rejoin history wipe and stale-context refusal alongside unchanged stereo audio return",
-    "review": "Final independent reviews clear bounded empty-chat attachment semantics, private-copy padding/identity proof, sampler source baseline, rehearsal asynchronous fixture assertions, CI regression prefix/artifact paths and controlled PCM fixture. Root actual integrated fast prefix and shipping universal build pass at named sources. These component proofs do not establish original sustained performance, whole-window AX/keyboard, provider, capture or installed-device acceptance.",
-    "performance": "Named local M3 Max original two-case sustained PASS remains separate from original hosted ARM/Intel failures. Private-copy helper median falls from 0.318292 to 0.142250 milliseconds in one local comparison, with no whole compositor/writer capacity or causal claim. Empty raw paint avoids redundant encoding without a measured speedup claim. Sampler reset/prime has source/parse proof only; no post-change measured CPU value or new 600-second run is asserted. Original failed gates, deadlines, sparse replay dependencies and incomplete Intel inspection remain unchanged; #92 stays open.",
-    "sharedCoreIOS": "Exact published 50084bb iOS job 120141131786 passes 613 tests across 84 suites in 234.930 seconds. Core/iOS source is unchanged in this cohort; macOS native fixture failures and their repairs remain separately scoped.",
+    "review": "Independent row-diagnostic review clears 46 source/artifact checks and preservation of all 11 original assertions and 40 cases. Independent workflow review clears manual-only execution, unchanged fixture gates, bounded artifact custody and the single main-CI upload path. One owned local invocation passes, without reproducing or identifying the old Intel failure. Original full-window AX/keyboard/layout criteria stay open.",
+    "performance": "Original hosted ARM/Intel performance failures and the named local M3 Max pass remain separate and unchanged. One source-bound 600-second-per-case ARM/Intel performance dispatch was accepted after publication of 9906185 (run 39873529565, one POST, no transport retry). It remains active at 2026-10-23T00:00:13.708521+00:00; no measurement window, result, capacity or improvement is claimed. Component copy timing does not establish sustained capacity or historical cause; #92 remains open.",
+    "sharedCoreIOS": "Exact 990 iOS passes 613 tests across 84 suites in 237.338 seconds. Exact 500 iOS previously passed the same counts in 234.930 seconds. These are named Core results, not whole macOS CI success.",
     "appIntentsMetadata": "Actual unsigned bundle contains all six documented App Intents and three stable resource entities; an owned bundle with scene action removed is rejected",
     "guestPrivateTalkback": "Actual shipping manager/default receiver through owned TURN/Chrome passes addressed microphone PCM and decoded Opus, public/Monitor/Aux/pre+post ISO exclusion, no private sidechain ducking, FX/ring/converter boundary resets, exact public settings restoration, queued revision invalidation and full-lease press/release/rejoin/deadline safety. Native AppKit mouse/Space/repeat/modifier/responder/removal checks pass. Mixer and send authority expire the hold after ten seconds while MainActor is deliberately blocked.",
     "guestProgramVideo": "Actual default manager/controller/VT/H264 sender through owned TURN/Chrome decodes Program pixels, starting at <=320x180/15fps and constraining bitrate to real receiver feedback. Explicit source/stop/restart/rejoin, pre-BEGIN/held-install/control-close, encoder ownership and held-compositor privacy regressions pass. A real partial FU-A send recovers on the next successful IDR. Earlier repeated raw-track-recorder A/V67.94/76.19ms stayed below100ms, native cues below50ms; source timestamps and capture-disabled retained audio channel preserve the actual clock path.",
@@ -53,7 +53,7 @@
     "showScheduling": "Mac-only explicit destination selections and shared event metadata produce independent acknowledged/existing/manual-required/blocked/unconfirmed rows through existing account authority and repair catalog. One creation per owned YouTube channel; mixed existing/new selections reuse review-only IDs and conflicting existing IDs send no POST. Actual account/scheduling fixtures, real owned editor AX/AppKit submission and full workspace/profile lifecycle pass. Unsupported providers remain external/manual; thumbnail/bind/import/edit operations stay explicit. No live provider mutation was performed. See PROVIDER_ACCOUNTS.md. Independent exact-source account/coordinator and native editor review also passes with no actionable findings.",
     "finalGuestVideo": "Final integrated repeated Program raw-track recorder failed at 105.104 ms against the unchanged 100 ms bound (contiguous PCM: 103.104 ms); independent video-element/separate-audio-worklet path: 90.527 ms; native source: 11.48 ms. Exact Chrome 155 source proves captureStream(MediaStream srcObject) clones raw tracks. The failed artifact is retained; an unchanged observational repeat at 35.40 ms establishes variability, not a fix. The optional remote element-audio provider probe has positive raw PCM but silent element PCM and exits 77 / UNQUALIFIED. An optional file-only calibration also failed a known 150 ms negative control. Native-app SCK audio-only positives validate parser/original-PTS observation; exact-PID headless, headed and LaunchServices Chrome normal-file positives remain silent. Normal Chrome output and genuine playback A/V remain unqualified; no sender timing fix or relaxed gate is claimed.",
     "viewerFreshness": "Actual mounted ProviderBroadcastStatus with real owned AccountSession/Vault and controlled provider responses reproduces stale idle UI without a timeline, then passes current/expired/clock-rollback/unknown status and visible read timestamps after the fix. A bounded mounted timeline issues no provider requests. YouTube zero remains distinct from unavailable; provider/channel/event identity prevents cache borrowing; stray Twitch event IDs cannot alias channels. Forget/reauthorize/cancelled reauthorize/shutdown invalidate readings synchronously. Exact provider account and scheduling regressions pass. See AUDIENCE_EVENTS.md and PROVIDER_ACCOUNTS.md.",
-    "integratedSource": "Current local integration is 7fbe42d, published main remains 50084bb at audit time. Production empty-chat and converter cost repairs are compiled in actual 57c0f25 universal Release. Three later validation recipes are explicit post-build deltas. Earlier merge/build/fixture receipts remain in their historical wave objects; no old run is relabelled current.",
+    "integratedSource": "Current reviewed integration is 69210da; published main is 9906185 at the fresh audit. Diagnostic-only changes preserve all shipping app/Core/vendor bytes from the successful 57c0f25 build. The current 841-path set, all hashes and five explicit post-build recipes are verified.",
     "postMergeFocused": "Native direct chat (4 groups), provider accounts (including 12 stale-reply fences), scheduling (2 groups), local control, program recording and diagnostics pass after merging main. Native guest preparation passes all 80 layout/count combinations, 16 saved-slot capacity, legacy identity migration and wrong-slot/wrong-role rejection. Three changed workflows, 31 zsh syntax checks, three Python parses and 61 unique issue records pass; distribution audit fixtures pass all five test methods including signature gates, executable/debug-dylib hook rejection and missing App Intents.",
     "recoveryPostMerge": "Post-merge actual program recording, diagnostics, session-recovery coordinator/journal, recovery event review and account/vault binding suites pass. Cases include exact inventory limits/truncation, immutable session identities, no automatic reads or replay, live/ended/unknown receipts, timeout/late-response fences and account/profile/runtime authority. The 16 MiB declared and actual package-document read regression passes on macOS and iOS.",
     "workspacePostMerge": "Actual default native workspace suite passes at 8f5f78f, including detach/reattach, failed preparation/retry, App-root recreation across profile/fallback/backup, staged chat Take, recovery, package/LUT/ID transfer and automation interaction gates.",
@@ -64,11 +64,11 @@
     "viewerFreshnessPostMerge": "Actual shipping mounted SwiftUI child/public AX passes YouTube zero and Twitch seven current-to-expired and rollback without account publication, finite/zero/unknown distinctions, exact 60-second bound, identity/authority fences, forget/shutdown and no provider polling. Test-only fake HTTP responses include the requested user_id required by the stronger shipping identity validator. All native control suites exit zero; commands/results: /tmp/stream-macos-postmerge-controls-20261021/results.json.",
     "postMergeFinishedAt": "2026-10-21T21:33:22+00:00",
     "guestVideoBudgetFollowup": "The first complete RTCP-accounting matrix passed two fresh captures per source with unchanged native50ms/raw-track100ms limits: Program71.83/44.85ms, Secondary76.75/33.88ms, Clean56.27/23.79ms. These successful recordings do not establish a fix for the earlier105.104ms failure or qualify true element-rendered/physical playback. See NATIVE_GUEST_RETURN_VIDEO.md.",
-    "currentReviewedCore": "Shipping Core is unchanged from published 50084bb through 7fbe42d. Exact 500 ARM passes 613 tests across 84 suites in 84.165 seconds before the old PCM fixture fails in step 10; iOS passes 613/84 in 234.930 seconds. Intel remains active in step 9. Original e41 is terminal: both Mac jobs fail later native fixtures despite Core 609/83 PASS in 114.954/320.143 seconds; iOS 609/83 PASS in 190.578 seconds. These named Core successes do not imply whole native CI success.",
-    "currentReviewedUniversal": "Exact 57c0f25 generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS. Current 7fbe42d manifest verifies all 840 selected paths and vendor. Exactly three later recipes differ: CI adds three bounded JSON artifact paths, PCM Swift fixture and runner change. Shipping app/Core/vendor inputs remain identical to the successful build. Not all 840 inputs are claimed identical to that built tree; no second app build performed for fixture-only changes.",
+    "currentReviewedCore": "Core source is unchanged in this cohort. Exact 500 passes 613 tests across 84 suites on ARM in 84.165 seconds, Intel in 240.447 seconds and iOS in 234.930 seconds; both Mac jobs subsequently fail step 10. Intel PCM passes before the native row style assertion fails; ARM PCM full-horizon expiry failure is separate. Exact 990 native CI remains active at 2026-10-23T00:00:14.781567+00:00: iOS passes 613 tests across 84 suites in 237.338 seconds; both Mac jobs are active. No whole-run conclusion is asserted.",
+    "currentReviewedUniversal": "Actual 57c0f25 generation, unsigned universal arm64/x86_64 Release and bundle audit PASS is reused: all shipping app/Core/vendor inputs remain identical. Current 69210da manifest verifies 841 selected paths. Five later validation recipes differ from the built tree: CI, both PCM fixture files, row diagnostic fixture and new manual workflow. Relative to published 990, only CI and the row fixture change among the previous 840 paths, with one added workflow. No new app build or claim that all 841 hashes equal the old build.",
     "currentReviewedSharedEncoders": "Actual merged hardware-preference and explicit-software shared encoder graph passes strict initial-frame/container/sync/cadence/overflow/IDR/stop/cancellation assertions and real local RTMP/SRT receiver decode. The merge keeps explicit receiver capability verification and the STREAM_FFMPEG_BIN override. Log:/tmp/stream-central-shared-encoder-20261021.log.",
     "simultaneousStorageNetwork": "Two same-runtime actual shipping Controller/compositor/mixer/recorder/default-adaptive RTMP+SRT runs pass staged graphics/Revert/Take privacy, three decoded AV cues, real missing-storage detection/per-track failure/recorder cleanup, continuing healthy network outputs and independent stops. Final files:91local/129RTMP/261SRTframes; all original80ms sync/120ms endpoints/150ms cadence limits retained. This required fixing native packed-to-planar Program audio admission and raw-capture repeats racing the studio clock. See RECORDING_STORAGE_NETWORK.md.",
-    "currentReviewedControls": "All 28 combined controller/SDK tests, actual native IPC, 512 complete destination receipts, separate 256-layer Preview/Program receipts, source/ending/authority/profile checks and real localhost RTMP+independent recording controls pass. Exact native 65-destination audience mapper and real TCP freshness regression pass. Actual Chrome inspector and reference host/guest WebRTC flows pass. Official Elgato validation/package, universal helper and owned development lifecycle pass. Source/metadata references: transport-actions.md, LOCAL_CONTROL_IPC.md and DECK_AUDIO_MEDIA_VALIDATION.md.",
+    "currentReviewedControls": "Diagnostic-only native row instrumentation preserves all 11 assertions, 40 original cases, widths, startup, 50 ms settle, 60-second compile and 90-second runtime bounds. One owned offscreen M3/macOS 27.2 run passes all cases; original Intel style assertion case/cause remain unknown. No style substitution, production repair or complete AX/window acceptance is inferred.",
     "currentClockDiagnostics": "Actual fixed offset vs observed rate, drops/held callbacks, stale/missing/rejoin, resource/kernel export, persistent timer and independent RTMP/SRT continuity through recorder storage failure pass on named Mac15,8. Failed publishers retire their elapsed timer. Default decoded media keeps original 80 ms cue/150 ms cadence bounds. Shared encoded callback confidence is explicit. The historical 82.2/91.2 ms media failures were reproduced and corrected in the later AAC/presentation-clock wave; see wave2SharedAACMedia for unchanged-limit passing evidence. See STUDIO_DIAGNOSTICS.md and AV_CLOCK_PIPELINE_2026-10-22.json.",
     "guestPlayerLifecycle": "Actual same-stream HTML renderer reset reproduced and fixed; On/Off/source/mute transitions retain the current player, while a new full lease replaces it. One bounded strict matrix passes two raw captures per Program/Secondary/Clean without relaxing native50ms/raw100ms gates. The earlier105.104ms failure and normal rendered PCM/AEC limits remain explicit in GUEST_RETURN_AV_ORACLES.md.",
     "optionalNativeTCP": "Both arm64 and x86_64 owned dependency/backend archives verify actual minOS14 load commands, corresponding-source hashes and replacement-object relink material. ARM native and Rosetta x86 TCP control smokes pass; packaged ARM relink passes actual Manager/Chrome camera/screen/Opus/control/Program/Secondary/Clean/rejoin media. Universal packaging preserves matching slices. Shipping adoption remains disabled; minOS declarations are not actual macOS14 runtime proof, Rosetta is not native Intel full media, and TLS/Internet/mobile/Safari/rendered A/V remain unqualified. See NATIVE_GUEST_TCP_PORTABILITY.md and independent providers review.",
@@ -336,7 +336,8 @@
     "wave19PortableSoundPad": "Historical actual imported/repaired pad AVAudioFile PCM2 chunks and nonzero Program 1 chunk each passed after original deletion. Former audio-only AVAssetReader/HAL blocker is resolved, not a current remaining requirement. Later playback delivery-clock changes have exact separate PCM/lifecycle evidence; old full graph is not relabelled current. Successful native keyboard chooser selection remains unqualified, no established lock/TCC cause.",
     "wave20SharedEncoderDiagnostics": "The original e41 ARM normal fixture passes; second software fixture exceeds its unchanged 90-second aggregate budget. Missing phase/receiver artifacts leave the wait and cause unresolved. Diagnostic-only instrumentation retains every old Swift line in order, original awaits/gates/feed pacing/deadline, adds durable phase/raw stdout/receiver-media capture and CI always-upload. One local actual software run passes in 20.83 seconds; 282 independent source/artifact checks clear. This is instrumentation smoke, not a CI reproduction, timeout-cleanup runtime test, throughput comparison or production fix.",
     "wave20SupplementalInspection": "One unchanged original ProgramRecordingFixtures.inspect(url, expectedDuration: nil, checkSync: false) call on the exact retained Intel case-1 movie passes on local M3 Max in 31.905 seconds: 15,247 frames, duration about 600.049833 seconds. Original AVAssetReader path/no alternate decoder. Original Intel 1380-second failure and pending inspection remain historical failed/incomplete outcomes; no waveform, nominal-capacity, Intel completion or timeout-cause inference.",
-    "wave21PCMFixture": "Fixture-only controlled native frame-grid correction follows real AVAudioFile reads. Original delayed 120/250 ms pulls, 100 ms pause and 40 ms read delay are controlled timeline cases; 200 ms full-horizon expiry requires zero handoff and next-pull recovery. Separate actual-host pause/resume/end and direct 4096-frame/1440-to-2656 partial bytes/rate/PTS/duration checks are unchanged, as are 30/160 ms and 1 microsecond gates. One full positive compile/fixture invocation passes in 3.947550 seconds; a targeted fresh-admission omission compiles then traps at native frame 4800 versus 6720 and stale PTS -60 ms. No shipping clock change, host-expired sample rebasing or deadline increase. New hosted execution remains pending."
+    "wave21PCMFixture": "Fixture-only controlled native frame-grid correction follows real AVAudioFile reads. Original delayed 120/250 ms pulls, 100 ms pause and 40 ms read delay are controlled timeline cases; 200 ms full-horizon expiry requires zero handoff and next-pull recovery. Separate actual-host pause/resume/end and direct 4096-frame/1440-to-2656 partial bytes/rate/PTS/duration checks are unchanged, as are 30/160 ms and 1 microsecond gates. One full positive compile/fixture invocation passes in 3.947550 seconds; a targeted fresh-admission omission compiles then traps at native frame 4800 versus 6720 and stale PTS -60 ms. No shipping clock change, host-expired sample rebasing or deadline increase. New hosted execution remains pending.",
+    "wave22RowDiagnostics": "Diagnostic-only native row instrumentation preserves all 11 assertions, 40 original cases, widths, startup, 50 ms settle, 60-second compile and 90-second runtime bounds. One owned offscreen M3/macOS 27.2 run passes all cases; original Intel style assertion case/cause remain unknown. No style substitution, production repair or complete AX/window acceptance is inferred."
   },
   "issues": [
     {
@@ -1125,7 +1126,8 @@
         "Annotation toolbar now retains narrow-canvas controls using the existing native scroll row and intrinsic picker width. All 192 actual hidden native geometry cases and separate failure-artifact custody checks pass; actions/owners are inert. Native keyboard/AX/VoiceOver, focus, pixels/contrast and full-window operator acceptance remain unqualified.",
         "The annotation fixture now identifies actual native segmented/switch types, preserving192geometry cases and a missing-picker negative. This repairs fixture matching only; original hosted types/count/case unknown, and complete AX/keyboard/focus/text/contrast/operator validation remains unqualified.",
         "Current owned standard/increased contrast style pixels are qualified after ICC-aware sampler correction; the old red-reference failure was a fixture error, not an environmental rendering refusal. Complete original native AX/actions/order, keyboard traversal, smaller-panel and focus flows remain open; no human-listening/physical-key requirement is introduced.",
-        "Nine genuine scene-semantic diagnostic boundaries remain unqualified; the last runtime used a regular-policy snapshot, while final conservative classifications/runner are syntax-checked only. Native style contrast remains PASS. Full original AX/keyboard/focus/window scope stays open without inferred lock or invented manual-only requirements."
+        "Nine genuine scene-semantic diagnostic boundaries remain unqualified; the last runtime used a regular-policy snapshot, while final conservative classifications/runner are syntax-checked only. Native style contrast remains PASS. Full original AX/keyboard/focus/window scope stays open without inferred lock or invented manual-only requirements.",
+        "New row-style diagnostics preserve the original 40 cases and 11 assertions. One owned M3/macOS 27.2 run passes; the original 500 Intel style assertion case/cause remain unknown. The manual-only workflow is prepared but not dispatched at this snapshot; full original AX/keyboard/window acceptance remains incomplete."
       ],
       "evidence": [
         "STUDIO_CONTROLS.md",
@@ -1156,7 +1158,9 @@
         "STUDIO_CONTRAST_PIXELS.md",
         "STUDIO_CONTRAST_PIXELS_2026-10-22.json",
         "SCENE_SEMANTIC_OBSERVATION.md",
-        "SCENE_SEMANTIC_OBSERVATION_2026-10-22.json"
+        "SCENE_SEMANTIC_OBSERVATION_2026-10-22.json",
+        "CONTROL_ROW_STYLE_DIAGNOSTICS.md",
+        "CONTROL_ROW_STYLE_DIAGNOSTICS_2026-10-22.json"
       ]
     },
     {
@@ -1341,11 +1345,11 @@
     "currentlyOpen": 34,
     "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open. Actual 57c0f25 generation, unsigned universal Release and bundle PASS includes the two production cost repairs. Current 7fbe42d has 840 verified source/recipe paths and exactly three post-build recipe changes; shipping inputs are unchanged from that build. Actual bounded paint/copy controls and integrated fast CI prefix pass; helper timing does not prove compositor capacity or historical cause. Sampler and rehearsal corrections remain parse/source-only; corrected native PCM fixture passes with intentional admission-omission negative, controlled late cases and unchanged real-host/direct byte checks. Original e41 native CI fails both Macs; latest published 500 ARM fails the old PCM timing assertion after Core 613/84 PASS, while iOS 613/84 PASS and Intel remains active in step 9. All original performance failures persist. No new 600-second performance dispatch accepted or run yet, no original feature closure or new operator/live qualification; prior wave objects and 61 issue states preserved.",
-  "integratedMain": "7fbe42db03306ee8c161d9733c1a0741f2a4d39c",
-  "githubStateRefreshedAt": "2026-10-22T23:36:16Z",
+  "overallStatus": "Incomplete roadmap: 27 original issues closed, 34 open. Current 69210da adds diagnostic-only row observations, durable artifacts and a prepared manual-only workflow. One owned M3/macOS 27.2 invocation passes all 40 unchanged cases; original Intel style assertion case and cause remain unknown. All shipping app/Core/vendor inputs remain identical to the actual 57c0f25 unsigned universal/bundle PASS. Current 841-path manifest has five explicit post-build validation recipes. Old 500 native CI is terminal: both Macs fail step 10 after Core 613/84 PASS; iOS succeeds. Exact 990 native CI remains active at 2026-10-23T00:00:14.781567+00:00: iOS passes 613 tests across 84 suites in 237.338 seconds; both Mac jobs are active. No whole-run conclusion is asserted. One source-bound 600-second-per-case ARM/Intel performance dispatch was accepted after publication of 9906185 (run 39873529565, one POST, no transport retry). It remains active at 2026-10-23T00:00:13.708521+00:00; no measurement window, result, capacity or improvement is claimed. Original performance failures and every historical wave remain unchanged; no new qualification or feature closure.",
+  "integratedMain": "69210da7bcc4ea234ebd8e250c793f01a2e7a746",
+  "githubStateRefreshedAt": "2026-10-22T23:59:12.588884+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "50084bb6ac1e92546fb830dcb8a51078ee121b86",
+  "publishedIntegration": "99061852457f648a279096ed36fa7b05e4042fb9",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1365,7 +1369,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "7fbe42db03306ee8c161d9733c1a0741f2a4d39c",
+  "currentReviewBase": "69210da7bcc4ea234ebd8e250c793f01a2e7a746",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -5867,5 +5871,132 @@
     },
     "performanceBoundary": "Original hosted performance failures and named local M3 Max pass remain unchanged. Two component cost repairs and fixture corrections do not establish a scheduler/GPU/bank-exhaustion mechanism, full representative workload/resource acceptance or #92 closure. No new 600-second dispatch has been accepted or run at this freeze.",
     "limits": "All prior wave objects and 61 issue states preserved. No new closure, physical/manual-only gate or unimplemented speculative candidate. Ledger agent performed no native/runtime/movie/benchmark execution or API mutation."
+  },
+  "wave22Review": {
+    "currentLocalHead": "69210da7bcc4ea234ebd8e250c793f01a2e7a746",
+    "publishedMainAtSnapshot": "99061852457f648a279096ed36fa7b05e4042fb9",
+    "githubAudit": {
+      "recordedAt": "2026-10-22T23:59:12.588884+00:00",
+      "inventory": {
+        "path": "/tmp/stream-wave22-macos-inventory-20261022.json",
+        "bytes": 4105584,
+        "sha256": "2ed32aca609992aca28d1049a0e32159c884222851c2d5452fa8fffeecf080da"
+      },
+      "originalCriteriaReview": {
+        "path": "/tmp/stream-wave22-closure-audit-20261022.json",
+        "bytes": 27640,
+        "sha256": "286de82b1352e4d1bf031285d0278f50f1147cb5adca46695df0156b6ff3871c"
+      },
+      "counts": {
+        "original61": {
+          "closed": 27,
+          "open": 34
+        },
+        "allMacOS": {
+          "closed": 101,
+          "open": 34
+        },
+        "openPRs": 0
+      },
+      "all61BodiesAndStatesEqualPrior": true,
+      "additionalClosures": [],
+      "openPRs": [],
+      "all11OpenTrackersHaveIncompleteChildren": true
+    },
+    "reusedAppBuild": {
+      "source": "57c0f256ee1341c38e1838d173b04cc56aa49001",
+      "receipt": {
+        "path": "/tmp/stream-wave21-parent-final-results-20261022.json",
+        "bytes": 932,
+        "sha256": "7523231bbee6ed65130fbce81c4fd869bb72e29f6010518441a6b7a9a391cb40"
+      },
+      "currentManifest": {
+        "path": "/tmp/stream-wave22-diagnostic-production-manifest-20261022.json",
+        "bytes": 103399,
+        "sha256": "222e63cd94673322f91c32a83957815325065bc8ccba1219332cb32ffb3b2308"
+      },
+      "currentPaths": 841,
+      "verification": {
+        "path": "/tmp/stream-wave22-ledger-source-verification-20261022.json",
+        "bytes": 848,
+        "sha256": "3ec065488c1f7676b18fba71895a788f5e337976156dc4cdc30fc82556c90685"
+      },
+      "postBuildValidationRecipes": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/native-control-rows.yml",
+        "apple/scripts/media_playback_lifecycle_harness.swift",
+        "apple/scripts/run_media_playback_lifecycle_harness.zsh",
+        "apple/scripts/test_studio_control_rows.py"
+      ],
+      "shippingAppCoreVendorUnchanged": true,
+      "all841EqualBuiltTree": false,
+      "newAppBuildPerformed": false
+    },
+    "rowDiagnostics": {
+      "ownerCommit": "9b01366d8ff819be5fd787ada1155957609f327d",
+      "integratedCommit": "65cdd6b652b45ef0270bc2c785ff77dba5425cc6",
+      "documents": [
+        {
+          "source": "69210da7bcc4ea234ebd8e250c793f01a2e7a746",
+          "path": "apple/docs/CONTROL_ROW_STYLE_DIAGNOSTICS.md",
+          "bytes": 2852,
+          "sha256": "269afa98c9a785029997de8641d3005a3add7da20e896ffb285d34ef8afc0579"
+        },
+        {
+          "source": "69210da7bcc4ea234ebd8e250c793f01a2e7a746",
+          "path": "apple/docs/CONTROL_ROW_STYLE_DIAGNOSTICS_2026-10-22.json",
+          "bytes": 5684,
+          "sha256": "a501d0d0616853831486976616f2323ce1769f697d07ed85d09d76aa345d5434"
+        }
+      ],
+      "independentReview": {
+        "path": "/tmp/stream-wave22-control-row-independent-review-20261022/review.json",
+        "bytes": 2358,
+        "sha256": "ee08085da2063453330d62ee52ec4c01f4bc28d8cd865f4641d03bcabde8e1d6"
+      },
+      "scope": "Diagnostic-only, all 11 original assertions/40 cases/widths/startup/50 ms settle/60 s compile/90 s runtime unchanged. One owned offscreen M3/macOS 27.2 invocation compiles and passes all cases; no relevant notifications, identity replacement or requested-style mismatch observed. This does not reproduce or identify the original Intel cause, or qualify complete operator/AX/window acceptance."
+    },
+    "manualWorkflow": {
+      "path": ".github/workflows/native-control-rows.yml",
+      "source": "69210da7bcc4ea234ebd8e250c793f01a2e7a746",
+      "sha256": "f5acda2871beb57eb408257968c70593fbc9cc051646043108cfbc656134b7c8",
+      "independentReview": {
+        "path": "/tmp/stream-native-control-rows-workflow-independent-review-20261022.json",
+        "bytes": 2943,
+        "sha256": "12c94db85d30bb8a3bb861b705c951023fefaa4e324904e40807f13263add71a"
+      },
+      "status": "Prepared manual-only workflow; no POST accepted or execution claimed at this snapshot. Main CI adds one artifact upload path; assertions and deadlines remain unchanged."
+    },
+    "original500NativeCI": {
+      "terminalReport": {
+        "path": "/tmp/stream-ci-50084bb-terminal-report-20261022.json",
+        "bytes": 573142,
+        "sha256": "f54abaf0760391b7600a2a66afe192cc6c503a1f01461447b11920dbfc27ec7a"
+      },
+      "result": "Both Macs FAIL / iOS SUCCESS. Core 613/84 passes on ARM/Intel/iOS in 84.165/240.447/234.930 seconds. Intel step 10 PCM passes with a 146.525 ms owned delay, then row fixture line 98 style persistence fails; exact case/cause unknown. ARM requested 40 ms delay actually lasts 169.576 ms and expires the entire 150 ms PCM horizon. The two failures remain separate; no retrospective hosted PASS."
+    },
+    "current990NativeCI": {
+      "snapshot": {
+        "path": "/tmp/stream-wave22-990-native-ci-snapshot-20261022.json",
+        "bytes": 32980,
+        "sha256": "9f406240e75dea0b9ef89405adf6019e0ad833c6ffc78c102f1673122f464612"
+      },
+      "state": "Exact 990 native CI remains active at 2026-10-23T00:00:14.781567+00:00: iOS passes 613 tests across 84 suites in 237.338 seconds; both Mac jobs are active. No whole-run conclusion is asserted."
+    },
+    "current990Performance": {
+      "dispatchBinding": {
+        "path": "/tmp/stream-performance-9906185-dispatch-binding-20261022.json",
+        "bytes": 2298,
+        "sha256": "295823a604e19acbd1990e73ff5ab34d0a5971d64196fbdcc9f38a809f10c5ae"
+      },
+      "snapshot": {
+        "path": "/tmp/stream-wave22-990-performance-snapshot-20261022.json",
+        "bytes": 19216,
+        "sha256": "89a26480196d4f61280ac416e7a5591629945a3480b88df83adc6798fba792be"
+      },
+      "state": "One source-bound 600-second-per-case ARM/Intel performance dispatch was accepted after publication of 9906185 (run 39873529565, one POST, no transport retry). It remains active at 2026-10-23T00:00:13.708521+00:00; no measurement window, result, capacity or improvement is claimed.",
+      "originalE41FailuresUnchanged": true
+    },
+    "limits": "No ledger-agent native/build/movie/workload execution, API write, publication or additional qualification. All old wave objects, original issue states and failed receipts preserved."
   }
 }
