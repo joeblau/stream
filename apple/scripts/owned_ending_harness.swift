@@ -34,6 +34,24 @@ private final class EndingAuthorityGate: @unchecked Sendable {
     func revoke() { lock.withLock { valid = false } }
     func allows() -> Bool { lock.withLock { valid } }
 }
+private final class EndingRecordingEvents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = false
+    private var failure: String?
+    func receive(_ event: ProgramRecordingSession.Event) {
+        lock.withLock {
+            switch event {
+            case .recording: active = true
+            case .paused: active = false
+            case .failed(let error): active = false; failure = error
+            case .progress: break
+            }
+        }
+    }
+    var recording: Bool { lock.withLock { active && failure == nil } }
+    var failed: Bool { lock.withLock { failure != nil } }
+    var error: String? { lock.withLock { failure } }
+}
 private actor OwnedEndingHTTP {
     private let beforeCompletion: (@Sendable () -> Void)?
     init(beforeCompletion: (@Sendable () -> Void)? = nil) { self.beforeCompletion = beforeCompletion }
@@ -299,16 +317,33 @@ private actor OwnedEndingPublisher: Publisher {
         // Retain this bounded one-second workload during cold codec startup;
         // this fixture qualifies ending isolation rather than encoder cadence.
         config.videoCapacity = 60
-        let recording = ProgramRecordingSession(outputURL: folder.appendingPathComponent("program.mp4"), configuration: config)
-        for frame in 0..<60 {
+        let recordingEvents = EndingRecordingEvents()
+        let recording = ProgramRecordingSession(outputURL: folder.appendingPathComponent("program.mp4"), configuration: config,
+                                                event: recordingEvents.receive)
+        // Establish the actual writer's accepted-video-and-audio event before
+        // either ending action. These are the original frame zero and five
+        // PCM chunks, not additional preroll or a fabricated readiness receipt.
+        let firstSample = try ProgramRecordingFixtures.video(at: 0)
+        outputs.fanout.enqueueVideo(firstSample); recording.appendVideo(firstSample)
+        for chunk in 0..<5 { recording.appendAudio(try ProgramRecordingFixtures.audio(at: Double(chunk) / 100)) }
+        try await Task.sleep(for: .milliseconds(17))
+        phase("continuingMedia/writer-activation")
+        try await until { recordingEvents.recording || recordingEvents.failed }
+        check(recordingEvents.recording, "Actual recording did not activate: \(recordingEvents.error ?? "missing recording event")")
+        phase("continuingMedia/writer-active")
+        for frame in 1..<60 {
             if frame == 20 {
+                check(recordingEvents.recording, "Recording was not active before remote ending")
                 let receipt = await account.endRemote(binding)
                 check(receipt.disposition == .ended && receipt.confirmsEnd, "Explicit same-owner end was not acknowledged")
                 check(outputs.liveCount == 2 && outputs.sessionToken(b.id) == healthyToken, "Remote ending touched live publisher state")
+                check(recordingEvents.recording, "Remote ending interrupted active recording")
             }
             if frame == 40 {
+                check(recordingEvents.recording, "Recording was not active before independent local stop")
                 let stopped = await outputs.stopIfCurrent(a.id, token: outputs.sessionToken(a.id)!)
                 check(stopped == .stopped && outputs.states[b.id] == .live, "Independent local stop touched healthy peer")
+                check(recordingEvents.recording, "Independent local stop interrupted active recording")
             }
             let sample = try ProgramRecordingFixtures.video(at: Double(frame) / 60)
             outputs.fanout.enqueueVideo(sample); recording.appendVideo(sample)
