@@ -30,8 +30,8 @@ most eight runs are retained per Engine; overflow is explicit and prevents a
 complete/reconciled result. Storage contains scalar/clock values, no source frame
 or callback. The original weak-self clock Task is not assumed actor-inherited.
 A per-run NSLock synchronizes bounded appends/state with actor commit/snapshot
-access. Its contention/cost is diagnostic overhead, not yet measured. No executor
-or capture changes, new actor awaits, I/O, renders or media/GPU waits are added.
+access. Its contention/cost is diagnostic overhead, not isolated on the actual
+frame path. No executor or capture changes, new actor awaits, I/O, renders or media/GPU waits are added.
 Snapshot freezes and copies the immutable array/state under the lock, then
 validates/serializes outside it. A late canceled resume can only address
 its captured frozen run, never the next case's Engine. Unobserved sleep returns
@@ -76,7 +76,8 @@ overflow and concurrent append/snapshot. The generic exact executed fixture is
 `scripts/composition_cycle_trace_harness.swift`. These supplied scalar events
 exercise the actual helper; they do not execute the Engine's authority guard or
 autonomous clock. The three retained generated Swift sources passed parsing;
-full target typechecking remains for the actual hosted build.
+at that stage, full target typechecking remained for the actual hosted build.
+The hosted outcome below now supplies that build evidence for both architectures.
 
 The first runtime outcome is retained: the fixture cast an `Int64` pending
 iteration as `Int`, returning its failure sentinel. Source review confirmed that
@@ -92,6 +93,68 @@ construction. That optimized, ThreadSanitizer-perturbed local loop is neither
 representative frame overhead nor pure lock cost; it cannot predict hosted
 throughput. No renderer, media, device, network, Core/App build or performance
 workload ran. The [dated receipt](COMPOSITION_CYCLE_TRACE_2026-10-22.json) binds
-both first outcomes, actual sources/executables/logs and parsing evidence. No
-new runtime attribution or performance-capacity result exists yet; all original
-#92 failures and gates remain unchanged.
+both first outcomes, actual sources/executables/logs and parsing evidence. The
+hosted result below adds actual runtime evidence; all original #92 failures and
+gates remain unchanged.
+
+## Hosted outcome: both jobs failed, four traces complete
+
+The single [manual run 39880680658](https://github.com/joeblau/stream/actions/runs/39880680658)
+at `f7d161a9343f65fdf1ab7c1785b193ff4089349f` used `cycle_trace=true` and the
+unchanged two 600s, 12-layer 1920×1080/30fps workloads on ARM and Intel. Both actual
+generated targets built successfully. All four traces are complete, structurally
+valid and reconciled with their original missed-deadline metrics. Those facts
+are distinct from the original job outcomes: **both jobs failed**, and #92 remains
+open. The [hosted receipt](HOSTED_COMPOSITION_CYCLE_TRACE_2026-10-22.json) retains
+portable archive-member/hash bindings and the independent analyses; full event
+arrays are retained in the original artifacts rather than duplicated here.
+
+| Actual original counter | ARM static | ARM replay | Intel static | Intel replay |
+|---|---:|---:|---:|---:|
+| Rendered, required 17850 |17215|17026|17103|17223|
+| Missed opportunities |786|975|897|777|
+| Before/during/after threshold crossings |92/694/0|188/787/0|73/823/1|25/752/0|
+| Committed-skip cycles |772|935|748|676|
+| Skip cycles with body ≥33.333333 ms / their skipped opportunities |2/10|5/33|321/460|451/542|
+| Original media inspection |complete|complete|complete|pending at 1380s deadline|
+
+All cycles have a real Engine, passed authority and attempted a frame; there are
+no nil-self/rejected zero spans in these distributions. ARM skip-cycle means for
+S−D/E−S/C−E are 58.342/17.642/.00551 ms and 60.335/17.789/.00544 ms. Entry lateness
+exceeds body duration in 771 of 772 and 930 of 935 skip cycles. Respectively,
+771 and 932 skip cycles immediately follow an observed successful sleep return;
+median return→S is .01825/.01871 ms.
+This narrows most accumulated ARM lateness before the observed sleep-return point;
+it does not identify timer delivery, executor scheduling, host contention or
+kernel wake. A during-body threshold crossing can follow substantial pre-entry
+lateness, so the category majority is not a render-cause count.
+
+Intel differs: skip-cycle means S−D/E−S are 38.815/47.854 ms and 29.710/55.061 ms,
+and long bodies account for 460 of 897 and 542 of 777 skipped opportunities. The body
+bracket includes the entire actual tick call and elapsed waits/scheduling, not
+pure CPU or CI-kernel work. A single common scheduler/renderer fix is not proved.
+Per-phase CPU-versus-elapsed and ready-versus-running observations are still
+needed to distinguish these boundaries. Diagnostic locking/stores can affect
+current and later cycles; these are instrumented observations rather than an
+uninstrumented capacity comparison.
+
+ARM's first recorded movie supplies 17214 available replay frames, all 17214 decoded;
+Intel's supplies 17103 available, all 17103 decoded. The nominal replay input/decode
+failures depend on the first output deficit. Actual-source decoding passes but
+does not qualify nominal 30fps. Writer audio/video drops are 0 in all four cases;
+Intel replay separately records 1 retired ingress intent. Both Intel writers finish,
+but the original 1380s deadline fires with the second media inspection still
+pending. Its persisted .218495s is pre-inspection bookkeeping, not a completed
+inspection duration. Neither complete clock traces nor completed writer metadata
+resolve that pending inspection. No supplementary decode or workload rerun was
+performed for this documentation.
+
+Each architecture's 12 original source inputs match the exact published blobs and
+both retained snapshot copies; the 3 generated files and reversible Engine/harness
+edits, source-set digest, generation UUID, manifest and compiled project bindings
+match. The raw binaries were not retained: their byte counts/SHA256 values are
+post-build/prelaunch **receipt-only**, not independent rehashes of archived
+executable bytes. Both full generated-target builds are separately evidenced by
+the original logs. None of this converts the failed 17850-frame gates into passes
+or establishes a production cause, repair, universal hardware capacity or waveform
+A/V-sync qualification.
