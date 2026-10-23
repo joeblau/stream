@@ -1,0 +1,73 @@
+{
+  "commit": "ec42acc8a91d305fc70687fbde9e4e13e9d93212",
+  "startedAtUTC": "2026-10-23T01:44:34.110315+00:00",
+  "scope": "syntax parse of generated controller/helper/fixture; standalone strict Swift6 helper typecheck only",
+  "fixtureRuntimeExecuted": false,
+  "fullControllerTypechecked": false,
+  "sourceHashes": {
+    "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/scripts/SharedEncoderStopDiagnostics.swift": "277a783927f7db34a1669755648dd248cbf83bd285f53325298e2c54a4f23cb1",
+    "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/scripts/run_shared_encoder_harness.zsh": "c015297ae4195cff283d0840fe2d448204fd131e00b2069b23d6ce357970c85a",
+    "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/scripts/prepare_shared_encoder_stop_diagnostics.py": "a0ac3ad63fa24b13b334fb716319e8d53cf69a915c7f8992dc9a149f9881188a",
+    "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/build/shared-encoder-validation/stop-diagnostics/DestinationOutputController.swift": "88faf1ef576bcb69d4795f878ad887d1332a4b0c9f6f55a9f89cfbfff4be91df",
+    "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/scripts/shared_encoder_harness.swift": "8463e5e3b7f43824c50542a22770a09c0b95b91326cd764d3935b5a9efacdaaf"
+  },
+  "checks": [
+    {
+      "name": "parse",
+      "command": [
+        "xcrun",
+        "swiftc",
+        "-frontend",
+        "-parse",
+        "-swift-version",
+        "6",
+        "-D",
+        "STREAM_NATIVE_VALIDATION",
+        "-D",
+        "STREAM_SHARED_ENCODER_STOP_DIAGNOSTICS",
+        "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/build/shared-encoder-validation/stop-diagnostics/DestinationOutputController.swift",
+        "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/scripts/SharedEncoderStopDiagnostics.swift",
+        "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/scripts/shared_encoder_harness.swift"
+      ],
+      "pid": 94700,
+      "timeoutSeconds": 120,
+      "timedOut": false,
+      "exitCode": 0,
+      "compilerChildReaped": true,
+      "elapsedSeconds": 0.0778410829952918,
+      "log": "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/build/shared-encoder-stop-parse-proof-20261022/parse-first.log",
+      "logSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "helper-typecheck",
+      "command": [
+        "xcrun",
+        "swiftc",
+        "-typecheck",
+        "-swift-version",
+        "6",
+        "-strict-concurrency=complete",
+        "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/scripts/SharedEncoderStopDiagnostics.swift"
+      ],
+      "pid": 94701,
+      "timeoutSeconds": 120,
+      "timedOut": false,
+      "exitCode": 0,
+      "compilerChildReaped": true,
+      "elapsedSeconds": 0.24313162500038743,
+      "log": "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/build/shared-encoder-stop-parse-proof-20261022/helper-typecheck-first.log",
+      "logSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "sourceHashesUnchanged": true,
+  "consumerScan": {
+    "path": "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/build/shared-encoder-validation/stop-diagnostics/source-consumers.txt",
+    "sha256": "50e80fc395a7481a926a61af9f1d8d29a1c880b9c82154ee70ead0ad984e23a7"
+  },
+  "sourceTransformReceipt": {
+    "path": "/private/tmp/stream-shared-encoder-stop-phase-20261022/apple/build/shared-encoder-validation/stop-diagnostics/source-receipt.json",
+    "sha256": "3e0385cc593e9ddf9c2c4837b1342d5f268681b505f960d437fcd12602c68742"
+  },
+  "finishedAtUTC": "2026-10-23T01:44:34.433816+00:00",
+  "result": "PASS"
+}
