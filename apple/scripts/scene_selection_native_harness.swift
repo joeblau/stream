@@ -386,7 +386,7 @@ private enum OwnedCAX {
             return qualified
         }
         if ownedKeyboardSetup {
-            guard window.contentView === root, window.canBecomeKeyWindow else {
+            guard window.contentView === root, window.canBecomeKey else {
                 keyboardFacts("activation-refused", extra: ["reason": "owned window is not eligible"])
                 return 77
             }
