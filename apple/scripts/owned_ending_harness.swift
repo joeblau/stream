@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreMedia
+import Darwin
 import Foundation
 import StreamCore
 
@@ -35,22 +36,58 @@ private final class EndingAuthorityGate: @unchecked Sendable {
     func allows() -> Bool { lock.withLock { valid } }
 }
 private final class EndingRecordingEvents: @unchecked Sendable {
+    struct Entry: Codable {
+        let event: String
+        let elapsedSeconds: Double
+    }
+    struct Snapshot: Codable {
+        let active: Bool
+        let failure: String?
+        let history: [Entry]
+    }
     private let lock = NSLock()
+    private let began = ProcessInfo.processInfo.systemUptime
     private var active = false
     private var failure: String?
+    private var history: [Entry] = []
     func receive(_ event: ProgramRecordingSession.Event) {
         lock.withLock {
+            let name: String
             switch event {
-            case .recording: active = true
-            case .paused: active = false
-            case .failed(let error): active = false; failure = error
-            case .progress: break
+            case .recording: active = true; name = "recording"
+            case .paused: active = false; name = "paused"
+            case .failed(let error): active = false; failure = error; name = "failed"
+            case .progress: return
             }
+            if history.count == 64 { history.removeFirst() }
+            history.append(.init(event: name, elapsedSeconds: ProcessInfo.processInfo.systemUptime - began))
         }
     }
     var recording: Bool { lock.withLock { active && failure == nil } }
     var failed: Bool { lock.withLock { failure != nil } }
     var error: String? { lock.withLock { failure } }
+    var snapshot: Snapshot { lock.withLock { .init(active: active, failure: failure, history: history) } }
+}
+private struct EndingMediaEvidence: Encodable {
+    struct Writer: Encodable {
+        let completed: Bool
+        let error: String?
+        let recoverable: Bool
+        let progress: ProgramRecordingSession.Progress
+    }
+    let phase: String
+    let recordedAt: Date
+    let recording: EndingRecordingEvents.Snapshot
+    let writer: Writer?
+    static func write(folder: URL, enabled: Bool, phase: String, events: EndingRecordingEvents,
+                      result: ProgramRecordingSession.Result? = nil) throws {
+        guard enabled else { return }
+        let value = Self(phase: phase, recordedAt: Date(), recording: events.snapshot,
+                         writer: result.map { .init(completed: $0.completed, error: $0.error,
+                                                    recoverable: $0.recoverable, progress: $0.progress) })
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(value).write(to: folder.appendingPathComponent("result.json"), options: .atomic)
+    }
 }
 private actor OwnedEndingHTTP {
     private let beforeCompletion: (@Sendable () -> Void)?
@@ -310,9 +347,23 @@ private actor OwnedEndingPublisher: Publisher {
         outputs.start(a, settings: StreamSettings(), sourceSize: CGSize(width: 320, height: 180)); outputs.start(b, settings: StreamSettings(), sourceSize: CGSize(width: 320, height: 180))
         try await until { await MainActor.run { outputs.liveCount == 2 } }
         let healthyToken = outputs.sessionToken(b.id)
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("owned-ending-media-\(UUID())")
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: folder) }
+        let requestedMediaDirectory = ProcessInfo.processInfo.environment["OWNED_ENDING_MEDIA_DIR"]
+        let retainMedia = requestedMediaDirectory != nil
+        let folder: URL
+        if let requestedMediaDirectory {
+            guard !requestedMediaDirectory.isEmpty else { throw CocoaError(.fileWriteInvalidFileName) }
+            folder = URL(fileURLWithPath: requestedMediaDirectory, isDirectory: true)
+            // mkdir, unlike createDirectory, atomically refuses an existing
+            // directory. Never reuse or remove another invocation's artifacts.
+            guard folder.path.withCString({ mkdir($0, S_IRWXU) }) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            FileHandle.standardOutput.write(Data("Owned ending retained media: \(folder.path)\n".utf8))
+        } else {
+            folder = FileManager.default.temporaryDirectory.appendingPathComponent("owned-ending-media-\(UUID())")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        defer { if !retainMedia { try? FileManager.default.removeItem(at: folder) } }
         var config = ProgramRecordingSession.Configuration(); config.frameRate = 60
         // Retain this bounded one-second workload during cold codec startup;
         // this fixture qualifies ending isolation rather than encoder cadence.
@@ -328,20 +379,26 @@ private actor OwnedEndingPublisher: Publisher {
         for chunk in 0..<5 { recording.appendAudio(try ProgramRecordingFixtures.audio(at: Double(chunk) / 100)) }
         try await Task.sleep(for: .milliseconds(17))
         phase("continuingMedia/writer-activation")
+        try EndingMediaEvidence.write(folder: folder, enabled: retainMedia, phase: "awaiting-writer-activation", events: recordingEvents)
         try await until { recordingEvents.recording || recordingEvents.failed }
+        try EndingMediaEvidence.write(folder: folder, enabled: retainMedia, phase: "writer-activation-observed", events: recordingEvents)
         check(recordingEvents.recording, "Actual recording did not activate: \(recordingEvents.error ?? "missing recording event")")
         phase("continuingMedia/writer-active")
         for frame in 1..<60 {
             if frame == 20 {
+                try EndingMediaEvidence.write(folder: folder, enabled: retainMedia, phase: "before-remote-ending", events: recordingEvents)
                 check(recordingEvents.recording, "Recording was not active before remote ending")
                 let receipt = await account.endRemote(binding)
+                try EndingMediaEvidence.write(folder: folder, enabled: retainMedia, phase: "after-remote-ending", events: recordingEvents)
                 check(receipt.disposition == .ended && receipt.confirmsEnd, "Explicit same-owner end was not acknowledged")
                 check(outputs.liveCount == 2 && outputs.sessionToken(b.id) == healthyToken, "Remote ending touched live publisher state")
                 check(recordingEvents.recording, "Remote ending interrupted active recording")
             }
             if frame == 40 {
+                try EndingMediaEvidence.write(folder: folder, enabled: retainMedia, phase: "before-local-stop", events: recordingEvents)
                 check(recordingEvents.recording, "Recording was not active before independent local stop")
                 let stopped = await outputs.stopIfCurrent(a.id, token: outputs.sessionToken(a.id)!)
+                try EndingMediaEvidence.write(folder: folder, enabled: retainMedia, phase: "after-local-stop", events: recordingEvents)
                 check(stopped == .stopped && outputs.states[b.id] == .live, "Independent local stop touched healthy peer")
                 check(recordingEvents.recording, "Independent local stop interrupted active recording")
             }
@@ -352,12 +409,15 @@ private actor OwnedEndingPublisher: Publisher {
             }
             try await Task.sleep(for: .milliseconds(17))
         }
+        try EndingMediaEvidence.write(folder: folder, enabled: retainMedia, phase: "awaiting-writer-finish", events: recordingEvents)
         let result = await withCheckedContinuation { continuation in recording.finish { continuation.resume(returning: $0) } }
+        try EndingMediaEvidence.write(folder: folder, enabled: retainMedia, phase: "writer-finished-before-oracles", events: recordingEvents, result: result)
         check(result.completed && result.progress.videoSamples == 60 && result.progress.audioSamples == 100, "Ending interrupted actual recording writer: \(result.progress)")
         try await ProgramRecordingFixtures.inspect(result.url, expectedDuration: 1, checkSync: true)
         check(await http.posts == 1, "Explicit ending sent more than one mutation")
         check(await first.stops == 1, "Independent stop missing"); check(await healthy.stops == 0, "Ending stopped healthy publisher")
         try await until { await healthy.videoCount == 60 }
+        try EndingMediaEvidence.write(folder: folder, enabled: retainMedia, phase: "all-media-and-ending-oracles-passed", events: recordingEvents, result: result)
         outputs.stopAll(); account.shutdown()
         print("PASS one explicit owned completion; healthy peer receives all 60 frames with no stop; actual recording accepts 60 video/100 audio inputs and its one-second H264/AAC file decodes across both actions")
     }
