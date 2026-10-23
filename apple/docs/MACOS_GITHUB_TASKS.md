@@ -1536,3 +1536,50 @@ original 61 issues **27 closed / 34 open**, all 135 macOS issues **101 closed /
 issues. Every open tracker has incomplete children; no closure is justified.
 Historical wave objects and receipts remain intact. This ledger update performs
 no native test, build, workload, API write or publication.
+
+## Optional generated clock diagnostics and terminal 990 results — 2026-10-23 UTC
+
+Current `5d6f0d7` adds **generated-only, default-disabled** cycle diagnostics.
+Existing deadlines, FPS, PTS, schedule, workload and acceptance remain unchanged.
+Synchronous boundaries around the existing tick distinguish elapsed opportunities
+before, during and after that call; separate reconciliation checks actual
+committed metrics. Bounded synchronized per-run storage retains pending, rejected,
+missing, frozen and overflow states explicitly. These categories do not identify
+a kernel, executor, CPU, GPU or host cause. Supplemental export follows the
+original durable case journal, consumes the unchanged deadline and cannot
+suppress the original gates.
+
+Eleven Python source checks pass, with nine original app/gate files unchanged.
+The actual helper and scheduler compile with strict Swift 6, `-j2` and TSan;
+the corrected generic fixture passes **12 outcomes in 2.630 seconds**. Three
+generated sources parse in 0.134 seconds. The first failed Int64 fixture-adapter
+outcome is retained; no helper gate changed. Supplied scalar-event checks do
+not execute the autonomous Engine or its actual authority guard. Full generated
+target typechecking, renderer/media execution and hosted attribution are still
+unqualified. A 1.464267-microsecond helper-only observer average is neither
+representative frame overhead nor pure lock cost or throughput qualification.
+
+The current manifest verifies **846 source/recipe paths**: the previous 841 plus
+five diagnostic scripts. Only the performance workflow and runner change among
+previous paths. Thirteen explicit post-build validation recipes differ from
+actual `57c0f25`; shipping app/Core/vendor bytes still match that unsigned
+universal Release and bundle PASS. No new app build is claimed. One future
+traced 600-second dispatch is **prepared only**, with no accepted POST or
+new hosted trace/result at this snapshot. All original numeric gates remain.
+
+Exact 990 native CI is terminal: both Mac jobs fail the old direct-chat line 291 count-eight fixture; iOS succeeds. Core passes 613 tests across 84 suites on ARM/Intel/iOS in 105.725/253.941/237.338 seconds. Both Macs pass corrected PCM and 40 row cases before the stale chat assertion; hosted actual request counts are unprinted. Later 80af CI remains active at 2026-10-23T00:49:00.852960+00:00, with iOS 613/84 PASS in 195.264 seconds and both Mac jobs active. No whole Mac CI pass. The later reviewed chat fixture correction does not relabel
+those original failed jobs. The naturally coalesced d0ec queued CI had zero
+jobs; it is not an additional test result.
+
+Original 990 performance is terminal FAILURE on both architectures. ARM static/replay renders 17,236/17,187 and Intel 15,716/16,669, all below 17,850; replay nominal input/decode failures depend on the first recording inventory. Both ARM inspections complete; Intel first completes in 110.977 seconds, while second remains incomplete at the original 1,380-second deadline. Its 0.165441-second persisted value is pre-inspection overhead, not inspection duration. Intel static healthy ingress drops total 18 (seven private-capacity, ten intent, one retired); replay has one retired drop. These are not blanket zero-drop results. No underlying CPU/GPU/scheduler cause is established. ARM completes both inspections; Intel's terminal incomplete
+second inspection is not a still-running process. Available replay inputs are
+17,235 on ARM and 15,691 on Intel, and all decode; nominal replay failures remain
+dependent on the first recording inventory. Older e41 failures and the named
+local M3 Max pass remain separate. No new capacity or **#92** closure follows.
+
+The complete read-only audit at **2026-10-23T00:43:51.037001+00:00** confirms original
+61 issues **27 closed / 34 open**, all 135 macOS issues **101 closed / 34 open**,
+unchanged original bodies/states and zero open PRs/outside open issues. Every
+open tracker has incomplete children. All historical wave objects and failed
+receipts remain intact; this ledger update performs no native test, build,
+workload, API write or publication.
