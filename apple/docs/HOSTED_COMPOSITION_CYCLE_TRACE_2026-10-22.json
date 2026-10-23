@@ -1,0 +1,1399 @@
+{
+  "schemaVersion": 1,
+  "datedLocal": "2026-10-22 America/Los_Angeles",
+  "actualTerminalUTC": "2026-10-23",
+  "scope": "Hosted instrumented diagnostic outcome. Both original jobs failed. Four complete/reconciled traces and two full generated-target build successes are distinct evidence, not uninstrumented capacity qualification, a cause, a fix or #92 closure. No new workload, test, native run, decode or download for this docs freeze.",
+  "run": {
+    "id": 39880680658,
+    "url": "https://github.com/joeblau/stream/actions/runs/39880680658",
+    "head": "f7d161a9343f65fdf1ab7c1785b193ff4089349f",
+    "event": "workflow_dispatch",
+    "conclusion": "failure",
+    "inputs": {
+      "seconds_per_workload": "600",
+      "cycle_trace": true
+    },
+    "rootDispatches": 1,
+    "retries": 0
+  },
+  "originalGates": {
+    "matrix": [
+      "macos-26",
+      "macos-26-intel"
+    ],
+    "casesPerJob": 2,
+    "secondsPerCase": 600,
+    "nominalFramesMinimum": 17850,
+    "hostClockErrorBoundSecondsExclusive": 0.08,
+    "ownedProcessDeadlineSeconds": 1380,
+    "jobTimeoutMinutes": 90
+  },
+  "sourceSHA256": {
+    "apple/StreamMac/CompositionEngine.swift": "c58de300a007de9653f3c2c896e0f652b69f1024f393a433620399cb3676ceb7",
+    "apple/scripts/studio_performance_harness.swift": "df27f908831de7c5b7e3d6523c5b335f2f106ca0a112c1963bc25167d2edab89",
+    "apple/scripts/composition_cycle_trace.swift": "9a2bf9972074ffb9b478e3c7c88e15b3f6f638a9f5fae7e2e03418fb2df730bd",
+    "apple/StreamMac/CompositionFrameSchedule.swift": "02dab6e6d3dbe79c8f124bde5a57dff7598e7901995a54946e7f8446c995bf1b",
+    "apple/scripts/prepare_composition_cycle_trace.py": "cc294cbb67317566c87631e330201d013d5645983e44f33f463d0935e9a7be2d",
+    "apple/project.yml": "70a51a403a7c19f4a2228920204b2d9fb3b013bf8364947ee5e18c51bfe79331",
+    "apple/scripts/run_studio_performance_harness.zsh": "8df33bfff8f729ab76908fc32c4c24b2801f906d4b7c6feb8ac095360236f4d9",
+    "apple/scripts/run_studio_performance_workloads.py": "695569ffba61497b2efc7ec75e2266fea86dad745c978633a6ecb9868e0cdc59",
+    "apple/scripts/program_recording_fixtures.swift": "24f9e02a8b0a9866a05161e28cc9792a29b3336785550d4cd4a53b3537e1a0b4",
+    "apple/scripts/performance_owned_replay.swift": "a37d3a5aba9bffc4e6e4516bfccc2e9461aa9bceb4b52a69c818f443140a937d",
+    "apple/scripts/performance_workload_evidence.swift": "4312804d5de645cad552adb26d5217846f3c483510fd9bcc13881500746627f3",
+    "apple/scripts/retain_composition_cycle_trace_inputs.py": "de5971642c84a2ab60d135fe661c9a3e7c70b97c12888efd45a938910ab165b1"
+  },
+  "sourceSetSHA256": "7b51598809daba8f140ae5687f423f8b4b3af0dddb616e00826d4571e2268470",
+  "provenanceScope": {
+    "perArchitectureOriginalInputs": 12,
+    "sourceSnapshotsCopies": 2,
+    "generatedFilesPerArchitecture": 3,
+    "completeSourceReversal": "All manifested Engine/harness edits reverse to exact complete published input bytes.",
+    "binary": "Only post-build/prelaunch byte-count and SHA256 receipts are archived; actual raw binaries were not retained. No independent binary rehash is claimed.",
+    "actualFullTargetBuild": "Original job logs compile generated Engine/helper/harness and record BUILD SUCCEEDED for each architecture.",
+    "initialDirectoryUUID": "A temporary generation directory UUID need not equal the manifest generationID; IDs in both trace outputs/manifests/compiled-inputs agree."
+  },
+  "jobs": [
+    {
+      "architecture": "arm64",
+      "job": 120177052350,
+      "conclusion": "failure",
+      "generatedTargetBuild": "passed",
+      "jobOutcome": "original nominal capacity failed",
+      "host": {
+        "hardwareModel": "VirtualMac2,1",
+        "os": "Version 26.6.2 (Build 25G83)",
+        "processors": 3,
+        "physicalMemory": 7516192768,
+        "processTranslated": false,
+        "metal": {
+          "counterSets": [],
+          "device": "Apple Paravirtual device",
+          "recommendedWorkingSetBytes": 5010800640,
+          "unifiedMemory": true,
+          "utilizationUnavailableReason": "Metal does not expose process-wide GPU utilization through this collector."
+        }
+      },
+      "artifact": {
+        "id": 12470354818,
+        "url": "https://github.com/joeblau/stream/actions/runs/39880680658/artifacts/12470354818",
+        "archiveName": "stream-cycle-trace-f7d161a-artifact12470354818-original.zip",
+        "archiveBytes": 602865851,
+        "archiveSHA256": "e06ada93e7b2c61b736221190179a5fc0cd59b7dab07cbd40239ad2d3d8b9c3d",
+        "metadataInventory": {
+          "localPath": "/tmp/stream-cycle-trace-f7d161a-artifact12470354818-metadata-manifest.json",
+          "bytes": 8724,
+          "sha256": "a9330537ae00afee5c147a15629a9f3f14f4174eceee44288982227293f37d7f"
+        },
+        "extraction": "43code/metadata members; movies remain ZIP-only. Input files below use paths relative to artifact root."
+      },
+      "originalLog": {
+        "localPath": "/tmp/stream-cycle-trace-f7d161a-120177052350-original.log",
+        "bytes": 729335,
+        "sha256": "5479c0d0240b8f2823f16d4b121bbca9c1a51e3865a784fd6e8f43172fc1a2d5"
+      },
+      "generationID": "46fa80c7-edc6-4bed-88ff-5871b7b655e7",
+      "sourceSetSHA256": "7b51598809daba8f140ae5687f423f8b4b3af0dddb616e00826d4571e2268470",
+      "generatedSHA256": {
+        "CompositionEngine.swift": "b8cb57815d31d9571992e3972c266d417d30f239868c8250d30060811ce429c2",
+        "studio_performance_harness.swift": "ed4c3dc1989397fd4e0a9a45d0ac8942685910519e2ce545947f96573660ef50",
+        "CompositionCycleTrace.swift": "9a2bf9972074ffb9b478e3c7c88e15b3f6f638a9f5fae7e2e03418fb2df730bd"
+      },
+      "compiledInputs": {
+        "generationID": "46fa80c7-edc6-4bed-88ff-5871b7b655e7",
+        "sourceSetSHA256": "7b51598809daba8f140ae5687f423f8b4b3af0dddb616e00826d4571e2268470",
+        "manifestSHA256": "2ed7aa3d7403cbc935bdd1c75791232e3243e04356950155e16a926c62dfb86b",
+        "binaryPath": "/Users/runner/work/stream/stream/apple/build/studio-performance-validation/derived/Build/Products/Debug/StudioPerformanceHarness",
+        "binaryBytes": 76934184,
+        "binarySHA256": "7b2e313f0b182ac0e77c5daa4c7c9aa23bc4d5ffda2009966c9949041e2fee7f",
+        "projectRecipeSHA256": "8e7073497256c004fa33b2ca024a9abe4ec2fc0f3bc24e274deb282021948931",
+        "xcodeProjectSHA256": "7801f8c6a1cfe7fe2448e6237818d0de6e94952a36ce6c2f341adcb5793379de",
+        "scope": "Post-build/pre-launch byte bindings only. Binary is not executed here. No claim of trace completeness, runtime success or performance qualification.",
+        "sourceInputsReverified": true,
+        "generatedInputsReverified": true
+      },
+      "sourceAndBuildMembers": [
+        {
+          "bytes": 10752,
+          "sha256": "2ed7aa3d7403cbc935bdd1c75791232e3243e04356950155e16a926c62dfb86b",
+          "archiveMember": "studio-performance-validation/frames/clock-cycle-inputs/46fa80c7-edc6-4bed-88ff-5871b7b655e7/manifest.json"
+        },
+        {
+          "bytes": 918,
+          "sha256": "90cc98f4c1a6d2e74ed7be8697be07b73afc72ea1fab0b644eff02f2172483d3",
+          "archiveMember": "studio-performance-validation/frames/clock-cycle-inputs/46fa80c7-edc6-4bed-88ff-5871b7b655e7/compiled-inputs.json"
+        },
+        {
+          "bytes": 6417,
+          "sha256": "8e7073497256c004fa33b2ca024a9abe4ec2fc0f3bc24e274deb282021948931",
+          "archiveMember": "studio-performance-validation/frames/clock-cycle-inputs/46fa80c7-edc6-4bed-88ff-5871b7b655e7/compiled-project.json"
+        },
+        {
+          "bytes": 188208,
+          "sha256": "7801f8c6a1cfe7fe2448e6237818d0de6e94952a36ce6c2f341adcb5793379de",
+          "archiveMember": "studio-performance-validation/frames/clock-cycle-inputs/46fa80c7-edc6-4bed-88ff-5871b7b655e7/compiled-project.pbxproj"
+        }
+      ],
+      "sourceVerification": {
+        "independentReadOnlyAssertionsPassed": 302303,
+        "sourceSnapshotsMatchPublished": true,
+        "bothSourceCopiesMatch": true,
+        "fullEngineHarnessReverseToOriginal": true,
+        "generatedHashesMatch": true,
+        "actualFullTargetBuilt": true,
+        "binaryRehash": false
+      },
+      "cases": [
+        {
+          "index": 0,
+          "workload": "Static owned desktop/camera placeholders + 10 shape/title layers",
+          "dimensions": [
+            1920,
+            1080
+          ],
+          "fps": 30,
+          "actualSamplingSeconds": 600.0600906666668,
+          "rendered": 17215,
+          "attempts": 17215,
+          "renderFailures": 0,
+          "missedDeadlines": 786,
+          "nominalCompositorGate": "failed",
+          "checks": [
+            {
+              "detail": "An actual submitted video endpoint is required.",
+              "name": "videoSourceFrontier",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual post-warmup arrivals 17184; monotonic true; required > 30.",
+              "name": "monotonicArrivals",
+              "status": "passed"
+            },
+            {
+              "detail": "Duration error 0.007353416999876572s; original bound <0.08s.",
+              "name": "hostClockDuration",
+              "status": "passed"
+            },
+            {
+              "detail": "Independent PCM must cover the final submitted video endpoint; actual Optional(0.046912709)s.",
+              "name": "audioSourceTailCoverage",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual writer completion.",
+              "name": "recordingFinalization",
+              "status": "passed"
+            },
+            {
+              "detail": "Original track/start/end/decode inspection completed.",
+              "name": "recordingDecodeInspection",
+              "status": "passed"
+            },
+            {
+              "detail": "Rendered 17215; required at least 17850 for 30 fps over 600.0s with the existing 5s allowance.",
+              "name": "nominalCompositorCapacity",
+              "status": "failed"
+            }
+          ],
+          "writtenVideoSamples": 17214,
+          "writerVideoDrops": 0,
+          "writerAudioDrops": 0,
+          "writerComplete": true,
+          "recordingVideoDelivery": {
+            "allocationFailures": 0,
+            "cadenceDrops": 0,
+            "cancelledDrops": 0,
+            "conversionFailures": 0,
+            "depth": 0,
+            "drops": 0,
+            "filteredDrops": 0,
+            "intentDrops": 0,
+            "privateCapacityDrops": 0,
+            "privateQueueDrops": 0,
+            "retiredIntentDrops": 0,
+            "sourceUnavailable": 0,
+            "unauthorizedDrops": 0
+          },
+          "originalMediaInspection": {
+            "complete": true,
+            "persistedValidationSeconds": 28.6107131663332,
+            "timingScope": "Completed original inspection",
+            "supplementalDecode": false
+          },
+          "hostClockDurationErrorSeconds": 0.007353416999876572,
+          "replaySource": null,
+          "actualDecodedSourceFrames": 0,
+          "resourceMeasurements": {
+            "samples": 591,
+            "processCPUSeconds": 243.553548,
+            "peakMemoryBytes": 271548416,
+            "thermalCounts": {
+              "0": 591
+            },
+            "maxMainActorDelayMilliseconds": 87.020958,
+            "kernels": {
+              "backend": "Core Image on Metal: Apple Paravirtual device",
+              "maximumMilliseconds": 26.54587500001071,
+              "samples": 574,
+              "totalMilliseconds": 4013.573250000377,
+              "unavailableSamples": 0
+            }
+          },
+          "trace": {
+            "member": {
+              "bytes": 14524911,
+              "sha256": "c4adfd4c92cc6b26ded7b1e2fc1f3eb12c0815b0f3e0f86e9701671916549b6d",
+              "archiveMember": "studio-performance-validation/frames/66C2D04A-F6F1-4BB6-A01D-4BB1DE3E7115/clock-cycle-case-0.json"
+            },
+            "caseMember": {
+              "bytes": 194430,
+              "sha256": "3a7dbae8d56d584074462ffeb2ef632a185162e98d1c9931b637ce3e852e0856",
+              "archiveMember": "studio-performance-validation/frames/66C2D04A-F6F1-4BB6-A01D-4BB1DE3E7115/case-0.json"
+            },
+            "complete": true,
+            "status": "complete",
+            "reconcilesMetrics": true,
+            "omittedRuns": 0,
+            "authority": "2DB8CDFC-D8D4-4F9C-8817-4A722DD22CBB",
+            "events": 41487,
+            "eventCapacity": 65536,
+            "omittedEvents": 0,
+            "taskStarted": true,
+            "taskExited": true,
+            "pendingCommitIteration": null,
+            "openSleepIterations": [],
+            "structuralErrors": [],
+            "committedBeforeDuringAfter": [
+              92,
+              694,
+              0
+            ],
+            "cycleStateCounts": {
+              "hasSelf": {
+                "true": 17215,
+                "false": 0,
+                "missingOrInvalid": 0
+              },
+              "passedAuthority": {
+                "true": 17215,
+                "false": 0,
+                "missingOrInvalid": 0
+              },
+              "attempted": {
+                "true": 17215,
+                "false": 0,
+                "missingOrInvalid": 0
+              }
+            },
+            "attemptedTickCallIntervalsMilliseconds": {
+              "count": 17215,
+              "SMinusD": {
+                "count": 17215,
+                "mean": 16.640618035899173,
+                "median": 12.301491999998689,
+                "p95": 49.847919999971054,
+                "max": 83.79775599999994,
+                "units": "milliseconds"
+              },
+              "EMinusS": {
+                "count": 17215,
+                "mean": 12.538833317920265,
+                "median": 12.485709000029601,
+                "p95": 18.15037499999744,
+                "max": 347.71883399999996,
+                "units": "milliseconds"
+              },
+              "CMinusE": {
+                "count": 17215,
+                "mean": 0.004766782689414548,
+                "median": 0.004249999998137355,
+                "p95": 0.006333999976050109,
+                "max": 0.7823329999955604,
+                "units": "milliseconds"
+              }
+            },
+            "committedSkipCycleJointMilliseconds": {
+              "count": 772,
+              "SMinusD": {
+                "count": 772,
+                "mean": 58.34183470595945,
+                "median": 57.709347000010894,
+                "p95": 69.9342169999727,
+                "max": 83.79775599999994,
+                "units": "milliseconds"
+              },
+              "EMinusS": {
+                "count": 772,
+                "mean": 17.642135853626158,
+                "median": 17.242145499978506,
+                "p95": 25.118124999997235,
+                "max": 347.71883399999996,
+                "units": "milliseconds"
+              },
+              "CMinusE": {
+                "count": 772,
+                "mean": 0.005506028498107127,
+                "median": 0.005041000011260621,
+                "p95": 0.006750000000465661,
+                "max": 0.27487500000279397,
+                "units": "milliseconds"
+              },
+              "committedSkippedOpportunities": 786,
+              "immediatelyPrecedingSuccessfulSleepCount": 771,
+              "withoutImmediatelyPrecedingSuccessfulSleepCount": 1,
+              "priorSleepObservedReturnLateness": {
+                "count": 771,
+                "mean": 58.396166907910775,
+                "median": 57.706319999997504,
+                "p95": 69.9208000000217,
+                "max": 83.77704700000322,
+                "units": "milliseconds"
+              },
+              "cyclesWithEntryLatenessGreaterThanBodyInterval": 771
+            },
+            "bodyDurationConditionedCommittedSkips": {
+              "shortBodyCycles": 770,
+              "shortBodySkipped": 776,
+              "longBodyCycles": 2,
+              "longBodySkipped": 10,
+              "entryExceedsBody": 771,
+              "pairedPreviousSleep": 771,
+              "returnToS": {
+                "count": 771,
+                "mean": 0.0213283605726136,
+                "median": 0.018249999993713573,
+                "p95": 0.0441659999996773,
+                "max": 0.20958300004713237
+              }
+            },
+            "observedSleepMilliseconds": {
+              "successful": 11750,
+              "canceled": 0,
+              "requestedDelay": {
+                "count": 11750,
+                "mean": 13.514962810127635,
+                "median": 14.14117299998179,
+                "p95": 23.339363999984926,
+                "max": 26.931079000001773
+              },
+              "suspensionToObservedReturn": {
+                "count": 11750,
+                "mean": 32.63575455089359,
+                "median": 29.10199949995149,
+                "p95": 69.53479100007098,
+                "max": 97.3492500000284
+              },
+              "returnLateness": {
+                "count": 11750,
+                "mean": 19.120791740765952,
+                "median": 14.629933500022162,
+                "p95": 53.86059199999727,
+                "max": 83.77704700000322
+              }
+            }
+          }
+        },
+        {
+          "index": 1,
+          "workload": "Real owned 1080p H.264 decode reused by desktop/camera placeholders + 10 shape/title layers",
+          "dimensions": [
+            1920,
+            1080
+          ],
+          "fps": 30,
+          "actualSamplingSeconds": 600.0270655000002,
+          "rendered": 17026,
+          "attempts": 17026,
+          "renderFailures": 0,
+          "missedDeadlines": 975,
+          "nominalCompositorGate": "failed",
+          "checks": [
+            {
+              "detail": "An actual submitted video endpoint is required.",
+              "name": "videoSourceFrontier",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual post-warmup arrivals 16995; monotonic true; required > 30.",
+              "name": "monotonicArrivals",
+              "status": "passed"
+            },
+            {
+              "detail": "Duration error 0.004025999999839769s; original bound <0.08s.",
+              "name": "hostClockDuration",
+              "status": "passed"
+            },
+            {
+              "detail": "Independent PCM must cover the final submitted video endpoint; actual Optional(0.007140251)s.",
+              "name": "audioSourceTailCoverage",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual writer completion.",
+              "name": "recordingFinalization",
+              "status": "passed"
+            },
+            {
+              "detail": "Original track/start/end/decode inspection completed.",
+              "name": "recordingDecodeInspection",
+              "status": "passed"
+            },
+            {
+              "detail": "Rendered 17026; required at least 17850 for 30 fps over 600.0s with the existing 5s allowance.",
+              "name": "nominalCompositorCapacity",
+              "status": "failed"
+            },
+            {
+              "detail": "Source has 17214 total frames for the 600.0s workload; nominal requirement 17850. 17071 frames are due before decoder grace ends.",
+              "name": "nominalReplayInputAvailability",
+              "status": "failed"
+            },
+            {
+              "detail": "Decoded 17214 actual frames; required 17071 from compressed source timestamps. This does not qualify nominal 30 fps capacity.",
+              "name": "actualSourceDecodeCadence",
+              "status": "passed"
+            },
+            {
+              "detail": "Original nominal gate unchanged: decoded 17214, required at least 17850. Input availability and actual-source decoding are reported separately.",
+              "name": "nominalReplayDecodeCapacity",
+              "status": "failed"
+            },
+            {
+              "detail": "No decoder error before sampling ended.",
+              "name": "replayDecoderCompletion",
+              "status": "passed"
+            }
+          ],
+          "writtenVideoSamples": 17025,
+          "writerVideoDrops": 0,
+          "writerAudioDrops": 0,
+          "writerComplete": true,
+          "recordingVideoDelivery": {
+            "allocationFailures": 0,
+            "cadenceDrops": 0,
+            "cancelledDrops": 0,
+            "conversionFailures": 0,
+            "depth": 0,
+            "drops": 0,
+            "filteredDrops": 0,
+            "intentDrops": 0,
+            "privateCapacityDrops": 0,
+            "privateQueueDrops": 0,
+            "retiredIntentDrops": 0,
+            "sourceUnavailable": 0,
+            "unauthorizedDrops": 0
+          },
+          "originalMediaInspection": {
+            "complete": true,
+            "persistedValidationSeconds": 28.792060374999892,
+            "timingScope": "Completed original inspection",
+            "supplementalDecode": false
+          },
+          "hostClockDurationErrorSeconds": 0.004025999999839769,
+          "replaySource": {
+            "availableFrames": 17214,
+            "durationSeconds": 600.0016666666667,
+            "framesDueBeforeGraceEnd": 17071,
+            "monotonic": true
+          },
+          "actualDecodedSourceFrames": 17214,
+          "resourceMeasurements": {
+            "samples": 589,
+            "processCPUSeconds": 301.14727,
+            "peakMemoryBytes": 370343936,
+            "thermalCounts": {
+              "0": 589
+            },
+            "maxMainActorDelayMilliseconds": 377.450542,
+            "kernels": {
+              "backend": "Core Image on Metal: Apple Paravirtual device",
+              "maximumMilliseconds": 25.371958333380462,
+              "samples": 568,
+              "totalMilliseconds": 4526.92804166918,
+              "unavailableSamples": 0
+            }
+          },
+          "trace": {
+            "member": {
+              "bytes": 14384973,
+              "sha256": "51cd7505f65c8a14c64fcbd664fa271adceb82b22f76bafdd590aa33c22979ef",
+              "archiveMember": "studio-performance-validation/frames/66C2D04A-F6F1-4BB6-A01D-4BB1DE3E7115/clock-cycle-case-1.json"
+            },
+            "caseMember": {
+              "bytes": 196000,
+              "sha256": "68359a263cb06fdcbe56c8d7c34d468d58ab96bca85db477a3f25c1cee390c3e",
+              "archiveMember": "studio-performance-validation/frames/66C2D04A-F6F1-4BB6-A01D-4BB1DE3E7115/case-1.json"
+            },
+            "complete": true,
+            "status": "complete",
+            "reconcilesMetrics": true,
+            "omittedRuns": 0,
+            "authority": "0CDCCE5D-E485-43F2-9FBB-6A43B505A98C",
+            "events": 41117,
+            "eventCapacity": 65536,
+            "omittedEvents": 0,
+            "taskStarted": true,
+            "taskExited": true,
+            "pendingCommitIteration": null,
+            "openSleepIterations": [],
+            "structuralErrors": [],
+            "committedBeforeDuringAfter": [
+              188,
+              787,
+              0
+            ],
+            "cycleStateCounts": {
+              "hasSelf": {
+                "true": 17026,
+                "false": 0,
+                "missingOrInvalid": 0
+              },
+              "passedAuthority": {
+                "true": 17026,
+                "false": 0,
+                "missingOrInvalid": 0
+              },
+              "attempted": {
+                "true": 17026,
+                "false": 0,
+                "missingOrInvalid": 0
+              }
+            },
+            "attemptedTickCallIntervalsMilliseconds": {
+              "count": 17026,
+              "SMinusD": {
+                "count": 17026,
+                "mean": 17.6385936941149,
+                "median": 12.79269649998605,
+                "p95": 52.6705479999946,
+                "max": 120.10078700000304,
+                "units": "milliseconds"
+              },
+              "EMinusS": {
+                "count": 17026,
+                "mean": 11.734951706390255,
+                "median": 11.644583500004956,
+                "p95": 17.41537500001141,
+                "max": 630.0769999999902,
+                "units": "milliseconds"
+              },
+              "CMinusE": {
+                "count": 17026,
+                "mean": 0.00476312351679086,
+                "median": 0.004167000006418675,
+                "p95": 0.006209000013768673,
+                "max": 0.5891659999906551,
+                "units": "milliseconds"
+              }
+            },
+            "committedSkipCycleJointMilliseconds": {
+              "count": 935,
+              "SMinusD": {
+                "count": 935,
+                "mean": 60.33522660320798,
+                "median": 58.91322200000286,
+                "p95": 75.55555699998513,
+                "max": 120.10078700000304,
+                "units": "milliseconds"
+              },
+              "EMinusS": {
+                "count": 935,
+                "mean": 17.789325361498122,
+                "median": 16.6421669999836,
+                "p95": 23.831124999996973,
+                "max": 630.0769999999902,
+                "units": "milliseconds"
+              },
+              "CMinusE": {
+                "count": 935,
+                "mean": 0.0054351422459394194,
+                "median": 0.004917000012937933,
+                "p95": 0.007791999960318208,
+                "max": 0.17320800002198666,
+                "units": "milliseconds"
+              },
+              "committedSkippedOpportunities": 975,
+              "immediatelyPrecedingSuccessfulSleepCount": 932,
+              "withoutImmediatelyPrecedingSuccessfulSleepCount": 3,
+              "priorSleepObservedReturnLateness": {
+                "count": 932,
+                "mean": 60.45298307510621,
+                "median": 58.9320169999919,
+                "p95": 75.52619999996386,
+                "max": 120.09049500001129,
+                "units": "milliseconds"
+              },
+              "cyclesWithEntryLatenessGreaterThanBodyInterval": 930
+            },
+            "bodyDurationConditionedCommittedSkips": {
+              "shortBodyCycles": 930,
+              "shortBodySkipped": 942,
+              "longBodyCycles": 5,
+              "longBodySkipped": 33,
+              "entryExceedsBody": 930,
+              "pairedPreviousSleep": 932,
+              "returnToS": {
+                "count": 932,
+                "mean": 0.02617267918503785,
+                "median": 0.01870850002160296,
+                "p95": 0.04899999999906868,
+                "max": 1.392792000027839
+              }
+            },
+            "observedSleepMilliseconds": {
+              "successful": 11577,
+              "canceled": 1,
+              "requestedDelay": {
+                "count": 11577,
+                "mean": 14.173536950160027,
+                "median": 14.883043000008911,
+                "p95": 24.56244999996852,
+                "max": 28.066345999999612
+              },
+              "suspensionToObservedReturn": {
+                "count": 11577,
+                "mean": 34.50333655878048,
+                "median": 30.248667000007117,
+                "p95": 72.77545800001826,
+                "max": 139.4497080000001
+              },
+              "returnLateness": {
+                "count": 11577,
+                "mean": 20.329799608620455,
+                "median": 15.21629700000085,
+                "p95": 57.36970300000394,
+                "max": 120.09049500001129
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "architecture": "x86_64",
+      "job": 120177052170,
+      "conclusion": "failure",
+      "generatedTargetBuild": "passed",
+      "jobOutcome": "original1380s owned deadline failed; nominal capacity also failed",
+      "host": {
+        "hardwareModel": "Macmini6,2",
+        "os": "Version 26.6.1 (Build 25G76)",
+        "processors": 4,
+        "physicalMemory": 15032385536,
+        "processTranslated": false,
+        "metal": {
+          "counterSets": [],
+          "device": "Apple Paravirtual device",
+          "recommendedWorkingSetBytes": 1073741824,
+          "unifiedMemory": false,
+          "utilizationUnavailableReason": "Metal does not expose process-wide GPU utilization through this collector."
+        }
+      },
+      "artifact": {
+        "id": 12471134007,
+        "url": "https://github.com/joeblau/stream/actions/runs/39880680658/artifacts/12471134007",
+        "archiveName": "stream-cycle-trace-f7d161a-artifact12471134007-original.zip",
+        "archiveBytes": 807266075,
+        "archiveSHA256": "992b768bd438e97a57fa7ed1c1e017a7db9968fa6f93e17a50f4935af07e3d5f",
+        "metadataInventory": {
+          "localPath": "/tmp/stream-cycle-trace-f7d161a-artifact12471134007-metadata-manifest.json",
+          "bytes": 8723,
+          "sha256": "0dc613bbea4184aaa1f68deae8b9379f2fe8e973e3beb973470008c2d8719276"
+        },
+        "extraction": "43code/metadata members; movies remain ZIP-only. Input files below use paths relative to artifact root."
+      },
+      "originalLog": {
+        "localPath": "/tmp/stream-cycle-trace-f7d161a-120177052170-original.log",
+        "bytes": 2491529,
+        "sha256": "b4cf545d9dce1a4b8dbc90bebf6e729a23e189f32454968ed0913db89fdc096a"
+      },
+      "generationID": "b261ff5d-7005-4cbe-9d3b-6c9f2814edc3",
+      "sourceSetSHA256": "7b51598809daba8f140ae5687f423f8b4b3af0dddb616e00826d4571e2268470",
+      "generatedSHA256": {
+        "CompositionEngine.swift": "f502d5b64d9f5971ba69d2e910f9d9f25a2b31e979b7853412b0bf0cc1651c53",
+        "studio_performance_harness.swift": "dcc9afafaa7f95f4f6463b3978dd17263cb4db0fa46e1d7ed99162fac49d4e40",
+        "CompositionCycleTrace.swift": "9a2bf9972074ffb9b478e3c7c88e15b3f6f638a9f5fae7e2e03418fb2df730bd"
+      },
+      "compiledInputs": {
+        "generationID": "b261ff5d-7005-4cbe-9d3b-6c9f2814edc3",
+        "sourceSetSHA256": "7b51598809daba8f140ae5687f423f8b4b3af0dddb616e00826d4571e2268470",
+        "manifestSHA256": "b72618291a87c78db33c3e93d6ac65891864bdd1c4e6b3f4214542ee49a3acce",
+        "binaryPath": "/Users/runner/work/stream/stream/apple/build/studio-performance-validation/derived/Build/Products/Debug/StudioPerformanceHarness",
+        "binaryBytes": 80460408,
+        "binarySHA256": "3748458c4f64d19b46d972e5a74a3bfd9da04b5fa74cfe0300a605f86fcac287",
+        "projectRecipeSHA256": "52b4d88d4d5b28bf59e9f4501ba5f3e914b058e6f748c28bf02426e02f8bfe01",
+        "xcodeProjectSHA256": "b44b1f2cee8ba6a203c0c58cc4f3bebfc293d173bb16a186c5c47decf6fe39a9",
+        "scope": "Post-build/pre-launch byte bindings only. Binary is not executed here. No claim of trace completeness, runtime success or performance qualification.",
+        "sourceInputsReverified": true,
+        "generatedInputsReverified": true
+      },
+      "sourceAndBuildMembers": [
+        {
+          "bytes": 10752,
+          "sha256": "b72618291a87c78db33c3e93d6ac65891864bdd1c4e6b3f4214542ee49a3acce",
+          "archiveMember": "studio-performance-validation/frames/clock-cycle-inputs/b261ff5d-7005-4cbe-9d3b-6c9f2814edc3/manifest.json"
+        },
+        {
+          "bytes": 918,
+          "sha256": "096e48da86383785f02dda77e6f0fd5386a4c976f67a957442b44179bc728251",
+          "archiveMember": "studio-performance-validation/frames/clock-cycle-inputs/b261ff5d-7005-4cbe-9d3b-6c9f2814edc3/compiled-inputs.json"
+        },
+        {
+          "bytes": 6417,
+          "sha256": "52b4d88d4d5b28bf59e9f4501ba5f3e914b058e6f748c28bf02426e02f8bfe01",
+          "archiveMember": "studio-performance-validation/frames/clock-cycle-inputs/b261ff5d-7005-4cbe-9d3b-6c9f2814edc3/compiled-project.json"
+        },
+        {
+          "bytes": 188208,
+          "sha256": "b44b1f2cee8ba6a203c0c58cc4f3bebfc293d173bb16a186c5c47decf6fe39a9",
+          "archiveMember": "studio-performance-validation/frames/clock-cycle-inputs/b261ff5d-7005-4cbe-9d3b-6c9f2814edc3/compiled-project.pbxproj"
+        }
+      ],
+      "sourceVerification": {
+        "independentReadOnlyAssertionsPassed": 285435,
+        "sourceSnapshotsMatchPublished": true,
+        "bothSourceCopiesMatch": true,
+        "fullEngineHarnessReverseToOriginal": true,
+        "generatedHashesMatch": true,
+        "actualFullTargetBuilt": true,
+        "binaryRehash": false
+      },
+      "cases": [
+        {
+          "index": 0,
+          "workload": "Static owned desktop/camera placeholders + 10 shape/title layers",
+          "dimensions": [
+            1920,
+            1080
+          ],
+          "fps": 30,
+          "actualSamplingSeconds": 600.0471286689999,
+          "rendered": 17103,
+          "attempts": 17103,
+          "renderFailures": 0,
+          "missedDeadlines": 897,
+          "nominalCompositorGate": "failed",
+          "checks": [
+            {
+              "detail": "An actual submitted video endpoint is required.",
+              "name": "videoSourceFrontier",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual post-warmup arrivals 17073; monotonic true; required > 30.",
+              "name": "monotonicArrivals",
+              "status": "passed"
+            },
+            {
+              "detail": "Duration error 0.021932380999942325s; original bound <0.08s.",
+              "name": "hostClockDuration",
+              "status": "passed"
+            },
+            {
+              "detail": "Independent PCM must cover the final submitted video endpoint; actual Optional(0.006012537)s.",
+              "name": "audioSourceTailCoverage",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual writer completion.",
+              "name": "recordingFinalization",
+              "status": "passed"
+            },
+            {
+              "detail": "Original track/start/end/decode inspection completed.",
+              "name": "recordingDecodeInspection",
+              "status": "passed"
+            },
+            {
+              "detail": "Rendered 17103; required at least 17850 for 30 fps over 600.0s with the existing 5s allowance.",
+              "name": "nominalCompositorCapacity",
+              "status": "failed"
+            }
+          ],
+          "writtenVideoSamples": 17103,
+          "writerVideoDrops": 0,
+          "writerAudioDrops": 0,
+          "writerComplete": true,
+          "recordingVideoDelivery": {
+            "allocationFailures": 0,
+            "cadenceDrops": 0,
+            "cancelledDrops": 0,
+            "conversionFailures": 0,
+            "depth": 0,
+            "drops": 0,
+            "filteredDrops": 0,
+            "intentDrops": 0,
+            "privateCapacityDrops": 0,
+            "privateQueueDrops": 0,
+            "retiredIntentDrops": 0,
+            "sourceUnavailable": 0,
+            "unauthorizedDrops": 0
+          },
+          "originalMediaInspection": {
+            "complete": true,
+            "persistedValidationSeconds": 96.07995848000007,
+            "timingScope": "Completed original inspection",
+            "supplementalDecode": false
+          },
+          "hostClockDurationErrorSeconds": 0.021932380999942325,
+          "replaySource": null,
+          "actualDecodedSourceFrames": 0,
+          "resourceMeasurements": {
+            "samples": 592,
+            "processCPUSeconds": 294.76396800000003,
+            "peakMemoryBytes": 255934464,
+            "thermalCounts": {
+              "0": 592
+            },
+            "maxMainActorDelayMilliseconds": 192.20436,
+            "kernels": {
+              "backend": "Core Image on Metal: Apple Paravirtual device",
+              "maximumMilliseconds": 24.211466999986442,
+              "samples": 571,
+              "totalMilliseconds": 8189.760069002205,
+              "unavailableSamples": 0
+            }
+          },
+          "trace": {
+            "member": {
+              "bytes": 14098150,
+              "sha256": "099d51089628bd9b29ceb243fad9d42023d5108386b2ad95bbe998cebde9f235",
+              "archiveMember": "studio-performance-validation/frames/F823919C-0A28-4E69-804E-F1ABBAD2F418/clock-cycle-case-0.json"
+            },
+            "caseMember": {
+              "bytes": 194317,
+              "sha256": "938e7c7f36da3c6d5c55c1fb67f66c5d67c4c5105ee776aa675f329071579d85",
+              "archiveMember": "studio-performance-validation/frames/F823919C-0A28-4E69-804E-F1ABBAD2F418/case-0.json"
+            },
+            "complete": true,
+            "status": "complete",
+            "reconcilesMetrics": true,
+            "omittedRuns": 0,
+            "authority": "CC3E0328-6571-406B-A19A-DA249851CE04",
+            "events": 39333,
+            "eventCapacity": 65536,
+            "omittedEvents": 0,
+            "taskStarted": true,
+            "taskExited": true,
+            "pendingCommitIteration": null,
+            "openSleepIterations": [],
+            "structuralErrors": [],
+            "committedBeforeDuringAfter": [
+              73,
+              823,
+              1
+            ],
+            "cycleStateCounts": {
+              "hasSelf": {
+                "true": 17103,
+                "false": 0,
+                "missingOrInvalid": 0
+              },
+              "passedAuthority": {
+                "true": 17103,
+                "false": 0,
+                "missingOrInvalid": 0
+              },
+              "attempted": {
+                "true": 17103,
+                "false": 0,
+                "missingOrInvalid": 0
+              }
+            },
+            "attemptedTickCallIntervalsMilliseconds": {
+              "count": 17103,
+              "SMinusD": {
+                "count": 17103,
+                "mean": 11.17649896632199,
+                "median": 7.397657000001345,
+                "p95": 39.085490000026766,
+                "max": 117.73214599999483,
+                "units": "milliseconds"
+              },
+              "EMinusS": {
+                "count": 17103,
+                "mean": 23.332744218908747,
+                "median": 20.696968000000197,
+                "p95": 33.47710200000438,
+                "max": 554.1412,
+                "units": "milliseconds"
+              },
+              "CMinusE": {
+                "count": 17103,
+                "mean": 0.004798056247520066,
+                "median": 0.0034460000024409965,
+                "p95": 0.007152000005589798,
+                "max": 1.1339380000135861,
+                "units": "milliseconds"
+              }
+            },
+            "committedSkipCycleJointMilliseconds": {
+              "count": 748,
+              "SMinusD": {
+                "count": 748,
+                "mean": 38.81462958021408,
+                "median": 47.56011000000581,
+                "p95": 70.20524000001024,
+                "max": 117.73214599999483,
+                "units": "milliseconds"
+              },
+              "EMinusS": {
+                "count": 748,
+                "mean": 47.85410060962623,
+                "median": 24.41362950002076,
+                "p95": 101.22869199997513,
+                "max": 554.1412,
+                "units": "milliseconds"
+              },
+              "CMinusE": {
+                "count": 748,
+                "mean": 0.006187541443390373,
+                "median": 0.0028624999977182597,
+                "p95": 0.008365000016056001,
+                "max": 1.1339380000135861,
+                "units": "milliseconds"
+              },
+              "committedSkippedOpportunities": 897,
+              "immediatelyPrecedingSuccessfulSleepCount": 630,
+              "withoutImmediatelyPrecedingSuccessfulSleepCount": 118,
+              "priorSleepObservedReturnLateness": {
+                "count": 630,
+                "mean": 42.920941520634656,
+                "median": 50.11823400002322,
+                "p95": 71.24079399999755,
+                "max": 117.66610200001742,
+                "units": "milliseconds"
+              },
+              "cyclesWithEntryLatenessGreaterThanBodyInterval": 431
+            },
+            "bodyDurationConditionedCommittedSkips": {
+              "shortBodyCycles": 427,
+              "shortBodySkipped": 437,
+              "longBodyCycles": 321,
+              "longBodySkipped": 460,
+              "entryExceedsBody": 431,
+              "pairedPreviousSleep": 630,
+              "returnToS": {
+                "count": 630,
+                "mean": 0.03134522539703178,
+                "median": 0.009966500016162172,
+                "p95": 0.02684800000861287,
+                "max": 6.828738000011072
+              }
+            },
+            "observedSleepMilliseconds": {
+              "successful": 10740,
+              "canceled": 1,
+              "requestedDelay": {
+                "count": 10740,
+                "mean": 7.481673088640671,
+                "median": 6.9647524999891175,
+                "p95": 14.198305000027176,
+                "max": 17.280231999990065
+              },
+              "suspensionToObservedReturn": {
+                "count": 10740,
+                "mean": 18.624989838082033,
+                "median": 14.2899815000128,
+                "p95": 54.00701400000253,
+                "max": 125.01439799999935
+              },
+              "returnLateness": {
+                "count": 10740,
+                "mean": 11.143316749441361,
+                "median": 6.5658410000032745,
+                "p95": 42.571589999992284,
+                "max": 117.66610200001742
+              }
+            }
+          }
+        },
+        {
+          "index": 1,
+          "workload": "Real owned 1080p H.264 decode reused by desktop/camera placeholders + 10 shape/title layers",
+          "dimensions": [
+            1920,
+            1080
+          ],
+          "fps": 30,
+          "actualSamplingSeconds": 600.0362081280002,
+          "rendered": 17223,
+          "attempts": 17223,
+          "renderFailures": 0,
+          "missedDeadlines": 777,
+          "nominalCompositorGate": "failed",
+          "checks": [
+            {
+              "detail": "An actual submitted video endpoint is required.",
+              "name": "videoSourceFrontier",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual post-warmup arrivals 17192; monotonic true; required > 30.",
+              "name": "monotonicArrivals",
+              "status": "passed"
+            },
+            {
+              "detail": "Duration error 0.004084570999793868s; original bound <0.08s.",
+              "name": "hostClockDuration",
+              "status": "passed"
+            },
+            {
+              "detail": "Independent PCM must cover the final submitted video endpoint; actual Optional(0.033647162)s.",
+              "name": "audioSourceTailCoverage",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual writer completion.",
+              "name": "recordingFinalization",
+              "status": "passed"
+            },
+            {
+              "detail": "Original track/start/end/decode inspection has not completed.",
+              "name": "recordingDecodeInspection",
+              "status": "pending"
+            },
+            {
+              "detail": "Rendered 17223; required at least 17850 for 30 fps over 600.0s with the existing 5s allowance.",
+              "name": "nominalCompositorCapacity",
+              "status": "failed"
+            },
+            {
+              "detail": "Source has 17103 total frames for the 600.0s workload; nominal requirement 17850. 16955 frames are due before decoder grace ends.",
+              "name": "nominalReplayInputAvailability",
+              "status": "failed"
+            },
+            {
+              "detail": "Decoded 17103 actual frames; required 16955 from compressed source timestamps. This does not qualify nominal 30 fps capacity.",
+              "name": "actualSourceDecodeCadence",
+              "status": "passed"
+            },
+            {
+              "detail": "Original nominal gate unchanged: decoded 17103, required at least 17850. Input availability and actual-source decoding are reported separately.",
+              "name": "nominalReplayDecodeCapacity",
+              "status": "failed"
+            },
+            {
+              "detail": "No decoder error before sampling ended.",
+              "name": "replayDecoderCompletion",
+              "status": "passed"
+            }
+          ],
+          "writtenVideoSamples": 17222,
+          "writerVideoDrops": 0,
+          "writerAudioDrops": 0,
+          "writerComplete": true,
+          "recordingVideoDelivery": {
+            "allocationFailures": 0,
+            "cadenceDrops": 0,
+            "cancelledDrops": 0,
+            "conversionFailures": 0,
+            "depth": 0,
+            "drops": 1,
+            "filteredDrops": 0,
+            "intentDrops": 0,
+            "privateCapacityDrops": 0,
+            "privateQueueDrops": 0,
+            "retiredIntentDrops": 1,
+            "sourceUnavailable": 0,
+            "unauthorizedDrops": 0
+          },
+          "originalMediaInspection": {
+            "complete": false,
+            "persistedValidationSeconds": 0.2184953929997846,
+            "timingScope": "Pre-inspection bookkeeping; inspection elapsed/completion unknown at original1380s deadline.",
+            "supplementalDecode": false
+          },
+          "hostClockDurationErrorSeconds": 0.004084570999793868,
+          "replaySource": {
+            "availableFrames": 17103,
+            "durationSeconds": 600.0016666666667,
+            "framesDueBeforeGraceEnd": 16955,
+            "monotonic": true
+          },
+          "actualDecodedSourceFrames": 17103,
+          "resourceMeasurements": {
+            "samples": 592,
+            "processCPUSeconds": 402.87823699999996,
+            "peakMemoryBytes": 300937216,
+            "thermalCounts": {
+              "0": 592
+            },
+            "maxMainActorDelayMilliseconds": 118.501803,
+            "kernels": {
+              "backend": "Core Image on Metal: Apple Paravirtual device",
+              "maximumMilliseconds": 33.2547179998528,
+              "samples": 575,
+              "totalMilliseconds": 9730.794517013692,
+              "unavailableSamples": 0
+            }
+          },
+          "trace": {
+            "member": {
+              "bytes": 13320225,
+              "sha256": "1c8569f12d91778ec7e798e8fce3ad2dcb9617cb0798041fb5a3a6eab97e5b91",
+              "archiveMember": "studio-performance-validation/frames/F823919C-0A28-4E69-804E-F1ABBAD2F418/clock-cycle-case-1.json"
+            },
+            "caseMember": {
+              "bytes": 196214,
+              "sha256": "a9f1e76c8bebae5d97ffa5966dbd02dc0def2bdc447897fa82d75cf65d0883dd",
+              "archiveMember": "studio-performance-validation/frames/F823919C-0A28-4E69-804E-F1ABBAD2F418/case-1.json"
+            },
+            "complete": true,
+            "status": "complete",
+            "reconcilesMetrics": true,
+            "omittedRuns": 0,
+            "authority": "922624AC-F081-4142-AFDB-2600E9784673",
+            "events": 34667,
+            "eventCapacity": 65536,
+            "omittedEvents": 0,
+            "taskStarted": true,
+            "taskExited": true,
+            "pendingCommitIteration": null,
+            "openSleepIterations": [],
+            "structuralErrors": [],
+            "committedBeforeDuringAfter": [
+              25,
+              752,
+              0
+            ],
+            "cycleStateCounts": {
+              "hasSelf": {
+                "true": 17223,
+                "false": 0,
+                "missingOrInvalid": 0
+              },
+              "passedAuthority": {
+                "true": 17223,
+                "false": 0,
+                "missingOrInvalid": 0
+              },
+              "attempted": {
+                "true": 17223,
+                "false": 0,
+                "missingOrInvalid": 0
+              }
+            },
+            "attemptedTickCallIntervalsMilliseconds": {
+              "count": 17223,
+              "SMinusD": {
+                "count": 17223,
+                "mean": 9.245803536491925,
+                "median": 5.110112000023946,
+                "p95": 28.703326000017114,
+                "max": 93.33975700009614,
+                "units": "milliseconds"
+              },
+              "EMinusS": {
+                "count": 17223,
+                "mean": 28.14202927440037,
+                "median": 25.931240000005346,
+                "p95": 41.23798199999146,
+                "max": 191.40349099999997,
+                "units": "milliseconds"
+              },
+              "CMinusE": {
+                "count": 17223,
+                "mean": 0.008639751204716651,
+                "median": 0.0037990000564604998,
+                "p95": 0.02044600000954233,
+                "max": 6.392587999987882,
+                "units": "milliseconds"
+              }
+            },
+            "committedSkipCycleJointMilliseconds": {
+              "count": 676,
+              "SMinusD": {
+                "count": 676,
+                "mean": 29.71039245118326,
+                "median": 27.913108000022476,
+                "p95": 65.53181699998095,
+                "max": 93.33975700009614,
+                "units": "milliseconds"
+              },
+              "EMinusS": {
+                "count": 676,
+                "mean": 55.06089008136038,
+                "median": 48.218160999993415,
+                "p95": 101.51283299999704,
+                "max": 191.40349099999997,
+                "units": "milliseconds"
+              },
+              "CMinusE": {
+                "count": 676,
+                "mean": 0.006237284024186175,
+                "median": 0.003364500022144057,
+                "p95": 0.015905999985989183,
+                "max": 0.6038669999979902,
+                "units": "milliseconds"
+              },
+              "committedSkippedOpportunities": 777,
+              "immediatelyPrecedingSuccessfulSleepCount": 463,
+              "withoutImmediatelyPrecedingSuccessfulSleepCount": 213,
+              "priorSleepObservedReturnLateness": {
+                "count": 463,
+                "mean": 35.558761313175125,
+                "median": 40.88954400003422,
+                "p95": 66.96443200000795,
+                "max": 93.33255200006533,
+                "units": "milliseconds"
+              },
+              "cyclesWithEntryLatenessGreaterThanBodyInterval": 253
+            },
+            "bodyDurationConditionedCommittedSkips": {
+              "shortBodyCycles": 225,
+              "shortBodySkipped": 235,
+              "longBodyCycles": 451,
+              "longBodySkipped": 542,
+              "entryExceedsBody": 253,
+              "pairedPreviousSleep": 463,
+              "returnToS": {
+                "count": 463,
+                "mean": 0.022792285095970595,
+                "median": 0.010206000006292015,
+                "p95": 0.027578999986872077,
+                "max": 3.6074079999962123
+              }
+            },
+            "observedSleepMilliseconds": {
+              "successful": 8384,
+              "canceled": 0,
+              "requestedDelay": {
+                "count": 8384,
+                "mean": 5.948886599713646,
+                "median": 5.704878500029736,
+                "p95": 12.051345999992918,
+                "max": 15.95135100002517
+              },
+              "suspensionToObservedReturn": {
+                "count": 8384,
+                "mean": 13.565899124522673,
+                "median": 9.851693999982672,
+                "p95": 42.60425799997756,
+                "max": 99.131018999964
+              },
+              "returnLateness": {
+                "count": 8384,
+                "mean": 7.617012524809026,
+                "median": 2.045515499979956,
+                "p95": 34.46653099998366,
+                "max": 93.33255200006533
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "evidenceReports": {
+    "arm/review.md": {
+      "localPath": "/tmp/stream-cycle-trace-f7d-arm-analysis-20261022/review.md",
+      "bytes": 8002,
+      "sha256": "3c7aaaa803bf560a3a6ead838c3979a189a15d4d30e031da4efb60891b1d4296"
+    },
+    "arm/receipt.json": {
+      "localPath": "/tmp/stream-cycle-trace-f7d-arm-analysis-20261022/receipt.json",
+      "bytes": 1181,
+      "sha256": "c02a2c50fa82dfb3b387809abe5cdc29f6b6083be39832fdd6d8e59a2fe400d6"
+    },
+    "arm/audit.json": {
+      "localPath": "/tmp/stream-cycle-trace-f7d-arm-analysis-20261022/audit.json",
+      "bytes": 28362,
+      "sha256": "0d60166252d252a27c3045ce9a305d3f04b1c26a496695a57dfcca7fdae9dd90"
+    },
+    "arm/audit.py": {
+      "localPath": "/tmp/stream-cycle-trace-f7d-arm-analysis-20261022/audit.py",
+      "bytes": 9739,
+      "sha256": "82747f86a0c291a2ace5d20df9b9335d6629f45e555dd5c0171f823929a8d3b5"
+    },
+    "arm/summary.json": {
+      "localPath": "/tmp/stream-cycle-trace-f7d-arm-analysis-20261022/summary.json",
+      "bytes": 33708,
+      "sha256": "20be2ef67f0d94dfa3175eb31c1e7a9d46109d46e0921461a0acedd36c722f9f"
+    },
+    "intel/review.md": {
+      "localPath": "/tmp/stream-cycle-trace-f7d-intel-analysis-20261022/review.md",
+      "bytes": 8109,
+      "sha256": "88e4da769ac157b0f3a1e41735b4421c9e026272533d7eadd06bdffa3e0212a3"
+    },
+    "intel/receipt.json": {
+      "localPath": "/tmp/stream-cycle-trace-f7d-intel-analysis-20261022/receipt.json",
+      "bytes": 1221,
+      "sha256": "55dd24698bacb49c53d9574d47878a3f035adcc70a040eabf770989b1bd7c19c"
+    },
+    "intel/audit.json": {
+      "localPath": "/tmp/stream-cycle-trace-f7d-intel-analysis-20261022/audit.json",
+      "bytes": 30056,
+      "sha256": "f8845eba8bbf01ddc21f0370f639a723df3f8e5d9c36b9ecb98153509290ce08"
+    },
+    "intel/audit.py": {
+      "localPath": "/tmp/stream-cycle-trace-f7d-intel-analysis-20261022/audit.py",
+      "bytes": 9741,
+      "sha256": "5051bcbd93cce429e8d51e754967582d55e9f7dc45ed6dcb763f21161ea1b47e"
+    },
+    "intel/summary.json": {
+      "localPath": "/tmp/stream-cycle-trace-f7d-intel-analysis-20261022/summary.json",
+      "bytes": 36128,
+      "sha256": "773743de8a1239ce8d9f64cf52dcf41b9587456f8ed8e9f2be4df1fb13f818ff"
+    },
+    "automation/terminal-report": {
+      "localPath": "/tmp/stream-cycle-trace-f7d161a-terminal-report-20261022.json",
+      "bytes": 45225,
+      "sha256": "dbe995a563fe886cf1d8b25fe5ac78d56199434c021d1c0c191b6c5cbe00ab8f"
+    },
+    "automation/dispatch-binding": {
+      "localPath": "/tmp/stream-cycle-trace-f7d161a-dispatch-binding-20261022.json",
+      "bytes": 5881,
+      "sha256": "3b57c2d602f8db1b925f4cc94bcab3d27e3aa8c509e81082e1bdaee96519f0e1"
+    },
+    "automation/retained-artifacts": {
+      "localPath": "/tmp/stream-cycle-trace-f7d161a-retained-artifacts-20261022.json",
+      "bytes": 689,
+      "sha256": "5e0d9dcd295c912abe3f935cc2016855f9209db0a439e987a562c0c706dad3fa"
+    },
+    "automation/arm-original-preservation": {
+      "localPath": "/tmp/stream-cycle-trace-f7d161a-arm-original-preservation-20261022.json",
+      "bytes": 1793,
+      "sha256": "bfc635dcf0ccc059c46358fc24b3db66f238dc6d8e73f55e65c25e3159e37c7a"
+    },
+    "automation/intel-original-preservation": {
+      "localPath": "/tmp/stream-cycle-trace-f7d161a-intel-original-preservation-20261022.json",
+      "bytes": 1266,
+      "sha256": "8d499726b62c40c9ac796dd99cbf737e5aee4616ed553d1ea725a965c16319bd"
+    },
+    "automation/arm-compact-status-provenance": {
+      "localPath": "/tmp/stream-cycle-trace-f7d161a-arm-compact-status-provenance-20261022.json",
+      "bytes": 14220,
+      "sha256": "f3326c121e7abc5b445e49db298a4b48f7a23791c32c69644cb11071d4dac20f"
+    },
+    "automation/intel-compact-status-provenance": {
+      "localPath": "/tmp/stream-cycle-trace-f7d161a-intel-compact-status-provenance-20261022.json",
+      "bytes": 15229,
+      "sha256": "9b760ca2ee723ef8ef38f38454ce9ea85cc1d65e646e1125148a62e6cd33e66a"
+    }
+  },
+  "interpretation": {
+    "phaseDefinitions": {
+      "D": "existing scheduled deadline",
+      "S": "actual synchronous tick-call start",
+      "E": "actual synchronous tick-call end",
+      "C": "existing scheduler observation"
+    },
+    "countsAreNotCauses": "Counts partition where a threshold crossed. A during-body crossing can follow mostly pre-entry lateness. S=D+1.9I,E=D+2.1I yields before0/during1 without establishing render cause.",
+    "sleep": "Request/observed return include async suspension, executor resumption and observer work; no kernel wake timestamp.",
+    "heterogeneity": "ARM skipped-cycle lateness is mostly present at observed sleep return, while Intel additionally has many long actual tick calls; neither implies a common scheduler or renderer repair.",
+    "observer": "Per-run locks/stores can affect current sleep/yield and later cycles. No uninstrumented counterfactual.",
+    "nextMissingBoundary": "Ready-versus-running scheduling around late returns; per-phase same-thread CPU versus elapsed/CI wait within Intel long bodies. Existing aggregate CPU/kernel/resource metrics do not identify those causes.",
+    "limits": "Original #92 capacity failures and Intel1380s deadline/pending second inspection remain. No waveform sync, universal hardware capacity or uplink qualification."
+  },
+  "priorHelperProofReceipt": {
+    "repoPath": "apple/docs/COMPOSITION_CYCLE_TRACE_2026-10-22.json",
+    "bytes": 15234,
+    "sha256": "2264cc8ea7003538ec040203dbd0b46fb8ae42ecb5a6f60c0b35b23e2ca26fbd",
+    "scope": "Unchanged historical first-failed fixture integer adapter, corrected actual helper/TSan12-outcome proof and generated parse; separate from hosted outcomes."
+  },
+  "readerDocument": {
+    "repoPath": "apple/docs/COMPOSITION_CYCLE_TRACE.md",
+    "bytes": 11044,
+    "sha256": "d2be9a17f12269cdad1a0a9335c48d513c0ec1e519ddea5f90b230a1b765b3e5"
+  }
+}
