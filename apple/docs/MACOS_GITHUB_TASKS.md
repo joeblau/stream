@@ -1492,3 +1492,47 @@ original 61 issues **27 closed / 34 open**, all 135 macOS issues **101 closed /
 inventory open issue. All open trackers have incomplete children; no closure is
 justified. Historical wave objects and failed receipts remain intact. This
 ledger work performs no native test, build, workload, API write or publication.
+
+## Hosted row results and exact reconnect fixture checks — 2026-10-23 UTC
+
+The first focused workflow at published `d0ec6ff` succeeds on **ARM and Intel,
+40 unchanged native row cases each**. All 11 assertions and original bounds
+remain intact. Public preferred-style notifications precede the first owned
+style assignment on both hosts; subsequent styles and native identities remain
+stable. These 80 component passes do not explain the original 500 Intel failure
+or qualify full workspace AX, keyboard, focus or contrast. Original local fields
+and failed evidence remain unchanged in the dated receipt.
+
+Current `a881b92` changes only the direct-chat fixture among the same **841
+selected inputs**. Six post-build validation recipes are explicit; shipping
+app/Core/vendor bytes still match actual `57c0f25` universal Release and bundle
+PASS. No new app build is claimed for this fixture/doc-only cohort.
+
+The reconnect fixture now checks exact five-type sets, cardinality, request
+bodies and session ownership without requiring request order. Initial session
+one creates five subscriptions, transferred session two creates none, and fresh
+session three creates five. The original fixture fails its stale cumulative
+eight predicate; the final full fixture passes six groups in **1.034 seconds**
+after a 2.511-second compile, reusing Core verified against all 76 current inputs.
+A one-type omission control fails expected ten versus actual nine on the prior
+helper; its global cardinality predicate is unchanged in final source. This is
+a fixture correction, with no shipping manager or live-service change. The
+original hosted log does not print an actual subscription count.
+
+Exact 990 ARM native CI fails in step 10 after Core 613 tests across 84 suites PASS in 105.725 seconds and corrected PCM PASS; the old direct-chat reconnect fixture still asserts cumulative eight subscriptions. The original hosted log prints no actual count. iOS 613/84 passes in 237.338 seconds; Intel remains active at 2026-10-23T00:20:53.729640+00:00. No whole-run success. The controlled local correction does not relabel that hosted
+failure or establish whole native CI success.
+
+Exact 990 ARM original 600-second performance run fails nominal capacity: 17,236 static and 17,187 replay renders versus 17,850, with 765/814 skipped clock slots and zero render failures. Both writer completions and inspections complete; healthy private/writer A/V drops are zero. All 17,235 available replay-source frames decode; nominal replay input/decode failures depend on the first recording inventory. Underlying skip cause is unproven. Intel remains active at 2026-10-23T00:20:50.814151+00:00. Both original inspection results complete in approximately
+30.241/30.631 seconds. Low endpoint-duration errors do not establish sustained
+waveform synchronization; observed writer-frontier skew is 0.327883/0.877830
+seconds. All 1,180 thermal samples are nominal. Independent review clears 25
+checks, but no scheduler, GPU, thermal or skip cause is established and **#92
+remains open**. Older hosted failures and the named local M3 Max pass remain
+separate. No new diagnostic or performance dispatch is part of this update.
+
+The complete read-only audit at **2026-10-23T00:19:07.904281+00:00** confirms
+original 61 issues **27 closed / 34 open**, all 135 macOS issues **101 closed /
+34 open**, unchanged original bodies/states and zero open PRs/outside open
+issues. Every open tracker has incomplete children; no closure is justified.
+Historical wave objects and receipts remain intact. This ledger update performs
+no native test, build, workload, API write or publication.
