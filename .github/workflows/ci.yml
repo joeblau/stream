@@ -97,7 +97,7 @@ jobs:
           CHAT_PRODUCTS_PATH="$PWD/build/tests/Build/Products/Debug" NOTICE_BUILD_PATH=build/twitch-chat-notifications-validation zsh scripts/run_twitch_chat_notifications_harness.zsh
           CHAT_PRODUCTS_PATH="$PWD/build/tests/Build/Products/Debug" GIFT_BUILD_PATH=build/youtube-gift-events-validation zsh scripts/run_youtube_gift_events_harness.zsh
           ENDING_BUILD_PATH=build/tests zsh scripts/run_studio_ending_harness.zsh
-          OWNED_ENDING_BUILD_PATH=build/tests zsh scripts/run_owned_ending_harness.zsh
+          OWNED_ENDING_MEDIA_DIR="$PWD/build/owned-ending-media" OWNED_ENDING_BUILD_PATH=build/tests zsh scripts/run_owned_ending_harness.zsh
       - name: Test saved guest preparation and native controller feedback
         run: |
           zsh scripts/run_video_encoder_fallback_harness.zsh
@@ -175,6 +175,7 @@ jobs:
             apple/build/recording-chat-paint-validation/result.json
             apple/build/frame-delivery-conversion-validation/receipt.json
             apple/build/frame-delivery-conversion-validation/conversion-proof.json
+            apple/build/owned-ending-media
             apple/build/studio-control-rows-validation/artifacts
             apple/build/recording-chat-validation/media-*
             apple/build/audience-events-validation/artifacts-*
