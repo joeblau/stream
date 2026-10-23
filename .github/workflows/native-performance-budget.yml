@@ -7,6 +7,10 @@ on:
         description: "Owned static and decoded-media workload duration (120–600 seconds each)"
         default: "600"
         required: true
+      cycle_trace:
+        description: "Collect generated-tool clock diagnostics with observation overhead"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -38,6 +42,7 @@ jobs:
           python3 scripts/test_studio_performance_workloads.py -v
           python3 scripts/test_performance_cadence_boundaries.py -v
           python3 scripts/test_performance_evidence.py -v
+          python3 scripts/test_composition_cycle_trace.py -v
           zsh scripts/run_composition_frame_schedule_harness.zsh
           zsh scripts/run_title_font_cache_harness.zsh
       - name: Name the machine and verify native architecture
@@ -56,6 +61,7 @@ jobs:
       - name: Measure actual render, decode, encoder, storage and process resources
         env:
           STUDIO_PERFORMANCE_SECONDS: ${{ inputs.seconds_per_workload }}
+          STUDIO_PERFORMANCE_CYCLE_TRACE: ${{ inputs.cycle_trace && '1' || '0' }}
         run: |
           mkdir -p build/studio-performance-results
           set -euo pipefail
@@ -69,3 +75,4 @@ jobs:
           path: |
             apple/build/studio-performance-validation/frames
             apple/build/studio-performance-results
+            apple/build/studio-performance-validation/cycle-trace-inputs
