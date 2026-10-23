@@ -202,6 +202,36 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         for _ in 0..<400 { if predicate() { return }; try? await Task.sleep(for: .milliseconds(5)) }
         precondition(predicate(), "Fixture deadline exceeded at line \(line)")
     }
+    // Independent fixture contract: every fresh socket must acknowledge all
+    // five public subscriptions. A migrated socket transfers them unchanged.
+    @MainActor private static func requireTwitchSubscriptions(_ http: HTTPFixture, sessions: [String]) throws {
+        let expectedTypes = ["channel.chat.message", "channel.chat.message_delete", "channel.chat.clear",
+                             "channel.chat.clear_user_messages", "channel.chat.notification"]
+        let requests = http.calls.filter { $0.1.url!.path == "/helix/eventsub/subscriptions" }.map(\.1)
+        FileHandle.standardOutput.write(Data("CHECK: Twitch subscription sets \(sessions.joined(separator: ",")); expected \(expectedTypes.count * sessions.count), actual \(requests.count)\n".utf8))
+        precondition(requests.count == expectedTypes.count * sessions.count,
+                     "Each fresh Twitch session requires exactly five public subscription requests")
+        var typesBySession: [String: [String]] = [:]
+        for request in requests {
+            precondition(request.httpMethod == "POST" && request.url?.scheme == "https"
+                && request.url?.host == "api.twitch.tv" && request.url?.port == nil && request.url?.query == nil)
+            let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+            precondition(Set(body.keys) == ["type", "version", "condition", "transport"])
+            precondition(body["version"] as? String == "1")
+            precondition(body["condition"] as? [String: String] == ["broadcaster_user_id": "owner", "user_id": "owner"])
+            let transport = body["transport"] as! [String: String]
+            precondition(Set(transport.keys) == ["method", "session_id"] && transport["method"] == "websocket")
+            let session = transport["session_id"]!
+            precondition(sessions.contains(session), "Transferred migration must not create subscriptions on another session")
+            typesBySession[session, default: []].append(body["type"] as! String)
+        }
+        precondition(Set(typesBySession.keys) == Set(sessions))
+        for session in sessions {
+            let actualTypes = typesBySession[session] ?? []
+            precondition(actualTypes.count == expectedTypes.count && Set(actualTypes) == Set(expectedTypes),
+                         "Fresh Twitch session is missing, duplicating or replacing a required subscription type")
+        }
+    }
     @MainActor static func main() async throws {
         let http = HTTPFixture(), gate = PollGate(), stream = StreamFixture()
         let first = FixtureSocket(), second = FixtureSocket(), third = FixtureSocket()
@@ -234,7 +264,7 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         precondition(!manager.snapshot(.twitch).isConnected)
         first.push(twitchControl("session_welcome"))
         await until { manager.snapshot(.twitch).isConnected }
-        precondition(http.calls.filter { $0.1.url!.path == "/helix/eventsub/subscriptions" }.count == 5)
+        try requireTwitchSubscriptions(http, sessions: ["session-one"])
         first.push(twitchEvent("twitch-one")); first.push(twitchEvent("twitch-one"))
         await until { stream.queue.messages.contains { $0.platform == "Twitch" } }
         let twitchID = StudioDirectChatDecoder.identity(.twitch, "owner", "twitch-one")
@@ -268,7 +298,7 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         precondition(!first.isClosed && sockets.opened[1].absoluteString == reconnect)
         second.push(twitchControl("session_welcome", session: "session-two"))
         await until { first.isClosed }
-        precondition(http.calls.filter { $0.1.url!.path == "/helix/eventsub/subscriptions" }.count == 5)
+        try requireTwitchSubscriptions(http, sessions: ["session-one"])
         let duringID = StudioDirectChatDecoder.identity(.twitch, "owner", "during-migration")
         precondition(manager.canDelete(duringID))
         manager.delete(duringID); await until { stream.queue.message(duringID) == nil }
@@ -288,7 +318,7 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         await gate.resume(); await until { sockets.opened.count == 3 }
         third.push(twitchControl("session_welcome", session: "session-three"))
         await until { manager.snapshot(.twitch).isConnected }
-        precondition(http.calls.filter { $0.1.url!.path == "/helix/eventsub/subscriptions" }.count == 8)
+        try requireTwitchSubscriptions(http, sessions: ["session-one", "session-three"])
         manager.shutdown(); precondition(third.isClosed && !manager.snapshot(.twitch).isConnected && stream.connections.isEmpty)
         third.push(twitchEvent("late-after-shutdown")); try? await Task.sleep(for: .milliseconds(20))
         precondition(stream.queue.message(StudioDirectChatDecoder.identity(.twitch, "owner", "late-after-shutdown")) == nil)

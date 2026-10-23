@@ -1,0 +1,375 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-22",
+  "result": "PASS",
+  "baseCommit": "d0ec6ff952052ce0e66c17acb247702f065d8dfd",
+  "changeScope": "Fixture and evidence only; shipping Core/Mac source unchanged.",
+  "originalFailure": {
+    "runID": 39873443470,
+    "jobID": 120154097535,
+    "commit": "9906185",
+    "step": 10,
+    "timestampUTC": "2026-10-23T00:05:46.1345450Z",
+    "exitCode": 133,
+    "assertion": "direct_chat_harness.swift:291 cumulative EventSub subscription requests ==8",
+    "log": {
+      "path": "/tmp/stream-ci-9906185-120154097535-original.log",
+      "bytes": 3353054,
+      "sha256": "b53b5a19aa239020cb537b71a7e4f1ead5bea23b1f10f2e107d9bc598757251f"
+    },
+    "limitation": "Hosted log reports no actual request count. The local corrected run observes10; do not attribute an unprinted hosted count."
+  },
+  "diagnosis": "49ff24d added the fifth public notification subscription and updated initial/migration4-to5 checks, but left cold reconnect cumulative8. Current shipping subscribe awaits all five exact ACKs before Connected; initial session-one creates5, transferred session-two creates0, fresh session-three creates5. No shipping fix is justified.",
+  "finalFixture": {
+    "file": "apple/scripts/direct_chat_harness.swift",
+    "sha256": "5195fac79ac43ac71653d303ef1aa3f9c7a01e9ed9e3fc8b5c4d3085202c037e",
+    "independentExpectedTypes": [
+      "channel.chat.message",
+      "channel.chat.message_delete",
+      "channel.chat.clear",
+      "channel.chat.clear_user_messages",
+      "channel.chat.notification"
+    ],
+    "sessionPolicy": "Initial and migration checkpoints permit only session-one with exactly5. Cold reconnect requires exactly5 on session-one and5 on session-three; session-two creates0. Per-session cardinality and exact type Set reject omission/duplicate/extra types without an ordering requirement.",
+    "requestPolicy": "POST HTTPS api.twitch.tv exact subscription path, no port/query; exact type/version/condition/transport body keys; version1, broadcaster/user owner, WebSocket method and matching session.",
+    "allOtherFixtureBytesUnchanged": true,
+    "invarianceCheck": "Remove added helper and restore exactly three replaced count assertions; resulting file is byte-identical to published original, including400 iterations x5ms deadlines and every unrelated gate."
+  },
+  "proofSequence": {
+    "firstThreeImmutable": {
+      "path": "/tmp/stream-direct-chat-reconnect-proof-20261022",
+      "resultsSHA256": "4076ccd0a6821348b8e4b3d0c4a7bd2b74efee0be96a1924ae494a263063d7a7",
+      "runtimeCount": 3,
+      "baseline": {
+        "exitCode": -5,
+        "meaning": "Actual published fixture reproduces original line291 precondition; signal5 equals shell133."
+      },
+      "correctedIntermediate": {
+        "exitCode": 0,
+        "meaning": "Full fixture passes with5,5,10 requests; initial helper also imposed type ordering."
+      },
+      "missingNotificationControl": {
+        "exitCode": -5,
+        "meaning": "Only actual manager source COPY omits channel.chat.notification for session-three; same intermediate corrected fixture fails the unchanged global cardinality check expected10/actual9."
+      }
+    },
+    "reviewRefinement": {
+      "delta": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/review-delta.json",
+        "bytes": 1153,
+        "sha256": "519bed5c228d3800c05e7d3b6dd93d99e79c5d6450515433c256d855fdb32ce5"
+      },
+      "meaning": "Review removed incidental request-order requirement while preserving exact cardinality/type set/body/session assertions. Earlier three evidence files remain immutable; omission control binds earlier helper but fails the same unchanged global count predicate."
+    },
+    "finalReviewedSource": {
+      "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022",
+      "resultsSHA256": "1d2be15e2da9ae732028c1b7a14766c7b036d62c00d01e414a37d1a3ac601f84",
+      "runtimeCount": 1,
+      "exitCode": 0,
+      "observedRequestCounts": [
+        5,
+        5,
+        10
+      ],
+      "allFullFixturePassSummaries": 6,
+      "meaning": "One separately authorized final full fixture run after the count+Set refinement; exact final file hash compiled and passed."
+    }
+  },
+  "CoreReuse": {
+    "sourceCount": 76,
+    "sourceReceipt": {
+      "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/source-Core-receipt.json",
+      "bytes": 12862,
+      "sha256": "90a9aed6131746411c2d9ae8cc428d22da9f2c747dd445e1f18bae160ede35aa"
+    },
+    "sourceHashMap": {
+      "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/Core-source-before.json",
+      "bytes": 8573,
+      "sha256": "cf3cae9ba03ecac7776ba018049b2b551784a5554325f57b71781c22c1fd4c97"
+    },
+    "allCurrentCoreSourceHashesMatch": true,
+    "binarySHA256": "615de8c8e4c12153167c40725ca925e04b720b586ca5ad816b7c3d81050ca711",
+    "frameworkPath": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/products/StreamCore.framework",
+    "frameworkManifest": {
+      "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/framework-files.json",
+      "bytes": 1282,
+      "sha256": "45b2a0c3e02411945a5484aa38b2f1257792a463ce001a4ab4a27a8b714388d4"
+    },
+    "CoreBuildsPerformed": 0,
+    "note": "Copied read-only current source-matching framework and exact provider receipt into owned proof; no shared cache/vendor writes."
+  },
+  "executionBoundary": "Controlled existing HTTP/socket/identity inlets and owned temporary preset files only. No account/vault/Keychain/defaults/UI/device/capture/audio/RTC, live provider/media/CDN operations, whole app build or Core rebuild. Swift compiles use-j2, shared native slots; runtime deadlines30s and original400x5ms fixture waits unchanged. All four owned executables completed and were reaped; wrappers released slot0.",
+  "sourceUnchangedDuringEachProof": true,
+  "proofFiles": {
+    "/tmp/stream-direct-chat-reconnect-proof-20261022": {
+      "Core-source-after.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/Core-source-after.json",
+        "bytes": 8573,
+        "sha256": "cf3cae9ba03ecac7776ba018049b2b551784a5554325f57b71781c22c1fd4c97"
+      },
+      "Core-source-before.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/Core-source-before.json",
+        "bytes": 8573,
+        "sha256": "cf3cae9ba03ecac7776ba018049b2b551784a5554325f57b71781c22c1fd4c97"
+      },
+      "baseline/StudioChatModel.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/baseline/StudioChatModel.swift",
+        "bytes": 12936,
+        "sha256": "49698c31d60d443a24093f0850773662b8b72797fa6b1d4c402d37750812e3d7"
+      },
+      "baseline/StudioChatOutbox.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/baseline/StudioChatOutbox.swift",
+        "bytes": 5019,
+        "sha256": "a121bf3e98d3806fd9df53a2067d6b9db6104e5374b10933da01e01a85bf63c1"
+      },
+      "baseline/StudioChatSocket.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/baseline/StudioChatSocket.swift",
+        "bytes": 1179,
+        "sha256": "d4a53b7c2eb4a1904ea5ca0397a92881ffc0e5c626e059c7638c196fab37cf19"
+      },
+      "baseline/StudioDirectChatManager.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/baseline/StudioDirectChatManager.swift",
+        "bytes": 40164,
+        "sha256": "f909d219affeb480f46311c59f3ef0f3a8d3c344c719d6f3d2c4a9918aed28a4"
+      },
+      "baseline/StudioDirectChatModel.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/baseline/StudioDirectChatModel.swift",
+        "bytes": 19458,
+        "sha256": "14527a58ac9456681dfe2da8857d35d3f7d0f286656a933bd886f756b403182c"
+      },
+      "baseline/direct-chat-harness": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/baseline/direct-chat-harness",
+        "bytes": 1472528,
+        "sha256": "954e3a2417ab74c83410cd4a278385a71b1d7cc5f5081bc29f366f986cdfeb3f"
+      },
+      "baseline/direct_chat_harness.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/baseline/direct_chat_harness.swift",
+        "bytes": 58001,
+        "sha256": "6a0cfe01331fd577d589ab56624627e0e0a5c5b872d3ebdd9a1dc8399edefb87"
+      },
+      "baseline-compile.log": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/baseline-compile.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "baseline-runtime.log": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/baseline-runtime.log",
+        "bytes": 56,
+        "sha256": "79cd3c03783c0a78a1d612014d21e0661442d94b2579894e40410d47266d9ee1"
+      },
+      "corrected/StudioChatModel.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/corrected/StudioChatModel.swift",
+        "bytes": 12936,
+        "sha256": "49698c31d60d443a24093f0850773662b8b72797fa6b1d4c402d37750812e3d7"
+      },
+      "corrected/StudioChatOutbox.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/corrected/StudioChatOutbox.swift",
+        "bytes": 5019,
+        "sha256": "a121bf3e98d3806fd9df53a2067d6b9db6104e5374b10933da01e01a85bf63c1"
+      },
+      "corrected/StudioChatSocket.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/corrected/StudioChatSocket.swift",
+        "bytes": 1179,
+        "sha256": "d4a53b7c2eb4a1904ea5ca0397a92881ffc0e5c626e059c7638c196fab37cf19"
+      },
+      "corrected/StudioDirectChatManager.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/corrected/StudioDirectChatManager.swift",
+        "bytes": 40164,
+        "sha256": "f909d219affeb480f46311c59f3ef0f3a8d3c344c719d6f3d2c4a9918aed28a4"
+      },
+      "corrected/StudioDirectChatModel.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/corrected/StudioDirectChatModel.swift",
+        "bytes": 19458,
+        "sha256": "14527a58ac9456681dfe2da8857d35d3f7d0f286656a933bd886f756b403182c"
+      },
+      "corrected/direct-chat-harness": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/corrected/direct-chat-harness",
+        "bytes": 1476080,
+        "sha256": "17661a2e23fd5c3caa1655f1bab5cfe09f8fc3ba5be6155c5761a9240d931fc3"
+      },
+      "corrected/direct_chat_harness.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/corrected/direct_chat_harness.swift",
+        "bytes": 60272,
+        "sha256": "1d381ce62fb5e52c5571b608854ef0808df14c3986e39249b0b0606a1ae2e83e"
+      },
+      "corrected-compile.log": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/corrected-compile.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "corrected-runtime.log": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/corrected-runtime.log",
+        "bytes": 1783,
+        "sha256": "3be6514f6a8fd9147e60ac08151bfb45b2f8f498fcd362d14f5deaeaf26ff1a7"
+      },
+      "framework-files.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/framework-files.json",
+        "bytes": 1282,
+        "sha256": "45b2a0c3e02411945a5484aa38b2f1257792a463ce001a4ab4a27a8b714388d4"
+      },
+      "missing-notification/StudioChatModel.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/missing-notification/StudioChatModel.swift",
+        "bytes": 12936,
+        "sha256": "49698c31d60d443a24093f0850773662b8b72797fa6b1d4c402d37750812e3d7"
+      },
+      "missing-notification/StudioChatOutbox.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/missing-notification/StudioChatOutbox.swift",
+        "bytes": 5019,
+        "sha256": "a121bf3e98d3806fd9df53a2067d6b9db6104e5374b10933da01e01a85bf63c1"
+      },
+      "missing-notification/StudioChatSocket.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/missing-notification/StudioChatSocket.swift",
+        "bytes": 1179,
+        "sha256": "d4a53b7c2eb4a1904ea5ca0397a92881ffc0e5c626e059c7638c196fab37cf19"
+      },
+      "missing-notification/StudioDirectChatManager.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/missing-notification/StudioDirectChatManager.swift",
+        "bytes": 40242,
+        "sha256": "f767115e7cb95900aca7d974ed9cd6af817da74d9b298b2101d67d44674916ff"
+      },
+      "missing-notification/StudioDirectChatModel.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/missing-notification/StudioDirectChatModel.swift",
+        "bytes": 19458,
+        "sha256": "14527a58ac9456681dfe2da8857d35d3f7d0f286656a933bd886f756b403182c"
+      },
+      "missing-notification/direct-chat-harness": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/missing-notification/direct-chat-harness",
+        "bytes": 1492944,
+        "sha256": "c7c77c56471efc06d90bb9542968e91d7ca6a6e4c6d4e03fc2ef189c4f93ec5d"
+      },
+      "missing-notification/direct_chat_harness.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/missing-notification/direct_chat_harness.swift",
+        "bytes": 60272,
+        "sha256": "1d381ce62fb5e52c5571b608854ef0808df14c3986e39249b0b0606a1ae2e83e"
+      },
+      "missing-notification-compile.log": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/missing-notification-compile.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "missing-notification-runtime.log": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/missing-notification-runtime.log",
+        "bytes": 347,
+        "sha256": "ab5ff6a4e4e0c8d31a1975a28b23a08f59947dcb79fbf0d8602de6e06f640a91"
+      },
+      "negative-control.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/negative-control.json",
+        "bytes": 736,
+        "sha256": "39f3a6a52b1e47b995268c4166ab3832b517258bd1c0543d8fb58196cb2f584c"
+      },
+      "results.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/results.json",
+        "bytes": 11939,
+        "sha256": "4076ccd0a6821348b8e4b3d0c4a7bd2b74efee0be96a1924ae494a263063d7a7"
+      },
+      "source-Core-receipt.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/source-Core-receipt.json",
+        "bytes": 12862,
+        "sha256": "90a9aed6131746411c2d9ae8cc428d22da9f2c747dd445e1f18bae160ede35aa"
+      },
+      "source-after.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/source-after.json",
+        "bytes": 687,
+        "sha256": "517b4de680b38cd85d359b94dffeba5b6ba3f8d9783c7a9aaf60af3308be30f6"
+      },
+      "source-before.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-proof-20261022/source-before.json",
+        "bytes": 687,
+        "sha256": "517b4de680b38cd85d359b94dffeba5b6ba3f8d9783c7a9aaf60af3308be30f6"
+      }
+    },
+    "/tmp/stream-direct-chat-reconnect-final-proof-20261022": {
+      "Core-source-after.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/Core-source-after.json",
+        "bytes": 8573,
+        "sha256": "cf3cae9ba03ecac7776ba018049b2b551784a5554325f57b71781c22c1fd4c97"
+      },
+      "Core-source-before.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/Core-source-before.json",
+        "bytes": 8573,
+        "sha256": "cf3cae9ba03ecac7776ba018049b2b551784a5554325f57b71781c22c1fd4c97"
+      },
+      "compile.log": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/compile.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "direct-chat-harness": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/direct-chat-harness",
+        "bytes": 1476016,
+        "sha256": "85ac0f2f029cba7fcda9f25143b8df343ca04100226b92a5e69357364833929d"
+      },
+      "results.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/results.json",
+        "bytes": 3347,
+        "sha256": "1d2be15e2da9ae732028c1b7a14766c7b036d62c00d01e414a37d1a3ac601f84"
+      },
+      "review-delta.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/review-delta.json",
+        "bytes": 1153,
+        "sha256": "519bed5c228d3800c05e7d3b6dd93d99e79c5d6450515433c256d855fdb32ce5"
+      },
+      "runtime.log": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/runtime.log",
+        "bytes": 1783,
+        "sha256": "3be6514f6a8fd9147e60ac08151bfb45b2f8f498fcd362d14f5deaeaf26ff1a7"
+      },
+      "source/StudioChatModel.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/source/StudioChatModel.swift",
+        "bytes": 12936,
+        "sha256": "49698c31d60d443a24093f0850773662b8b72797fa6b1d4c402d37750812e3d7"
+      },
+      "source/StudioChatOutbox.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/source/StudioChatOutbox.swift",
+        "bytes": 5019,
+        "sha256": "a121bf3e98d3806fd9df53a2067d6b9db6104e5374b10933da01e01a85bf63c1"
+      },
+      "source/StudioChatSocket.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/source/StudioChatSocket.swift",
+        "bytes": 1179,
+        "sha256": "d4a53b7c2eb4a1904ea5ca0397a92881ffc0e5c626e059c7638c196fab37cf19"
+      },
+      "source/StudioDirectChatManager.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/source/StudioDirectChatManager.swift",
+        "bytes": 40164,
+        "sha256": "f909d219affeb480f46311c59f3ef0f3a8d3c344c719d6f3d2c4a9918aed28a4"
+      },
+      "source/StudioDirectChatModel.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/source/StudioDirectChatModel.swift",
+        "bytes": 19458,
+        "sha256": "14527a58ac9456681dfe2da8857d35d3f7d0f286656a933bd886f756b403182c"
+      },
+      "source/direct_chat_harness.swift": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/source/direct_chat_harness.swift",
+        "bytes": 60372,
+        "sha256": "5195fac79ac43ac71653d303ef1aa3f9c7a01e9ed9e3fc8b5c4d3085202c037e"
+      },
+      "source-Core-receipt.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/source-Core-receipt.json",
+        "bytes": 12862,
+        "sha256": "90a9aed6131746411c2d9ae8cc428d22da9f2c747dd445e1f18bae160ede35aa"
+      },
+      "source-after.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/source-after.json",
+        "bytes": 687,
+        "sha256": "4f45d2709671f0a0bff05f1276680c2a6989f1debf6d9e99c3b8a55814adc0c4"
+      },
+      "source-before.json": {
+        "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022/source-before.json",
+        "bytes": 687,
+        "sha256": "4f45d2709671f0a0bff05f1276680c2a6989f1debf6d9e99c3b8a55814adc0c4"
+      }
+    },
+    "/tmp/stream-direct-chat-reconnect-proof-20261022.py": {
+      "path": "/tmp/stream-direct-chat-reconnect-proof-20261022.py",
+      "bytes": 6714,
+      "sha256": "762ea5acb144aa62322d81f407b2dc6f2276bc4156ca74b60050801a57982ecc"
+    },
+    "/tmp/stream-direct-chat-reconnect-final-proof-20261022.py": {
+      "path": "/tmp/stream-direct-chat-reconnect-final-proof-20261022.py",
+      "bytes": 4904,
+      "sha256": "1133fa83da2186c7e8232fbbe6177674e32e59d600b829e9ec5ba76f423c5cd8"
+    }
+  },
+  "qualification": "Fixes a stale local CI assertion. It does not establish a new hosted pass, provider account/live-feed acceptance or whole issue closure."
+}
