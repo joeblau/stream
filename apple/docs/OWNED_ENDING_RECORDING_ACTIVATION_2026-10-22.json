@@ -1,0 +1,691 @@
+{
+  "schemaVersion": 1,
+  "outcome": "PASS_SCOPED_CONTROLLED_LOCAL_FIXTURE",
+  "date": "2026-10-22",
+  "source": {
+    "base": "9f9f6bc6f4aa81c4ba1d0e92e096047741d9bfb7",
+    "activationCommit": "836299238c548d7a0036c808e429ee52105a2dc8",
+    "retentionCommit": "a7f0c44b2b91840988b7053b5dbaa62636c0a694",
+    "compiledInputs": {
+      "StreamMac/ProviderHTTP.swift": "b6325b30adfe0d802e6984f9d6830791e14385e8ad5cfe6d9f7fedef8eaec928",
+      "StreamMac/ProviderTokenVault.swift": "3259b297d2cb7d6025601e8e8d6dd6a082180c0f3b911ddfeb55f8c14e442105",
+      "StreamMac/OAuthLoopbackReceiver.swift": "752af412fb5a02eeca006082b93268dae6a8a5dded4947ec60f97f4c1193fe1c",
+      "StreamMac/StudioChatModel.swift": "49698c31d60d443a24093f0850773662b8b72797fa6b1d4c402d37750812e3d7",
+      "StreamMac/StudioDirectChatModel.swift": "14527a58ac9456681dfe2da8857d35d3f7d0f286656a933bd886f756b403182c",
+      "StreamMac/StudioChatSocket.swift": "d4a53b7c2eb4a1904ea5ca0397a92881ffc0e5c626e059c7638c196fab37cf19",
+      "StreamMac/StudioChatOutbox.swift": "a121bf3e98d3806fd9df53a2067d6b9db6104e5374b10933da01e01a85bf63c1",
+      "StreamMac/StudioDirectChatManager.swift": "f909d219affeb480f46311c59f3ef0f3a8d3c344c719d6f3d2c4a9918aed28a4",
+      "StreamMac/ProviderPendingCatalog.swift": "e10300d6cc032e1b6e07691250f8e097a83d8711954946c716934f9db64e5f2a",
+      "StreamMac/ProviderAccountSession.swift": "d6f1c315b91dd5dd3333e25d9675398fb5934bdb1b666ef2582090aabe927119",
+      "StreamBroadcast/Publisher.swift": "ef4d093bd956341f02dee3f4027b60d3f1f6937ac255693326aebd6fafd412f4",
+      "StreamMac/SessionState.swift": "540aed3521bd6586568bf9f6def849ec51d4373b8c3ca710f53d7dcf25f176c1",
+      "StreamMac/RawVideoResourceCoordinator.swift": "16e4c0314c6f3da380743017bbef82635319ca75c428f318fa433785543f1d90",
+      "StreamMac/FrameDeliveryBroker.swift": "e48e46e7706d0637015ab65814c302ea4d27c2b0e02e7b7b69c11f8bbed6b569",
+      "StreamMac/FrameDeliveryConverter.swift": "4f414f662bc86ce3b9f1f65293eff722895d5d09e02daaffb6b6f86070ffc321",
+      "StreamMac/DestinationVideoIngress.swift": "bfc054066654fe402f9fbbe5387dfd3758c60520f84b9e54835a0e4403836632",
+      "StreamMac/DestinationOutputController.swift": "371db297784256784613f4be23d85e3d54b1ba86a3562e5fd8e73020ca7660a6",
+      "StreamMac/DestinationEncodedMailbox.swift": "64f53fc36606b2ea653bd027047bd7d2a97efe60961494e2fc1667d7a92bcc9c",
+      "StreamMac/DestinationSharedEncoder.swift": "feec1e9ece5d224177609e271b8b20af2d5063485477199987577bccd44d309a",
+      "StreamMac/IsolatedRecordingTypes.swift": "9ad457d29fb7548f0f81a4182a74da3a0a3ac033e92cb96b807e64558dc70372",
+      "StreamMac/IsolatedVideoTypes.swift": "3fb8aae74a75ad5db7b2acc4eaf9a2bda616a5e21984d68d68ff28d2970dc3c0",
+      "StreamMac/RecordingChatPaint.swift": "5e706d860bbcbfda1036a398baadb5ee3af1232ca79d443323b28b72ef765132",
+      "StreamMac/RecordingChatTypes.swift": "e8de84430ccb16e63b05522f246f0e793dce7a7926f766c6f237aa7046ed6ec5",
+      "StreamMac/RecordingFrameDelivery.swift": "6a9b14cfa36103bddebaf0f65e6b73b92775668ac2d46661157f892100894c65",
+      "StreamMac/RecordingChatArchive.swift": "0a9c2ef94b3be4b942f2e9d1a43f0b3fba00fb943ac4f5cee2474e3ba3120513",
+      "StreamMac/RecordingChatReader.swift": "a59216ebb8d5a140ea49dfa951cd654c8473094b9da0e8cb115dfc805a9b1344",
+      "StreamMac/RecordingPreferences.swift": "45dfc617028b304bde7a69d4f3947d9f2732fa9c20968d7efd189fcd76ef7f15",
+      "StreamMac/ProgramRecordingSession.swift": "63afe8eac41cb01e5fbb14a0cccb642680804a13e834db7f07c478ad7018b11e",
+      "scripts/program_recording_fixtures.swift": "24f9e02a8b0a9866a05161e28cc9792a29b3336785550d4cd4a53b3537e1a0b4",
+      "scripts/owned_ending_harness.swift": "d744408249da299d2b1664f6efb35fffdf286635af0b314fd94e0c5c40e3a0b7"
+    },
+    "runnerSHA256": "4769b05f95243e4ed086816be3d5800fa4a7ef03bba876e0638134c0f907775f",
+    "ciWorkflowSHA256": "6929324a82801ac4b3c98a4b834797ea6a3c75eb9a1f113c16ac60b020bf5ca2",
+    "core": {
+      "all76SourceBindings": [
+        {
+          "path": "apple/StreamCore/AVClockTelemetry.swift",
+          "sha256": "d6b4f79795e39ce139e7c963f0b5fbf34fcfe25ab1f8cba74c172afc2bf99d57"
+        },
+        {
+          "path": "apple/StreamCore/AVSyncDelay.swift",
+          "sha256": "9a8f5c64e5880bb06403c5ad0561b1094f0723ca09760aea208f2da71b160f90"
+        },
+        {
+          "path": "apple/StreamCore/AdaptiveBitRateState.swift",
+          "sha256": "30b5f77f53dda53507655fc6aeca2821e6ee9508c86e91ab61cc69ca101143cb"
+        },
+        {
+          "path": "apple/StreamCore/AnimatedOverlayTiming.swift",
+          "sha256": "39500bcd751109e123f01156b734aea2174094eca3b8f835f0449d8ab30aa39d"
+        },
+        {
+          "path": "apple/StreamCore/Annotations.swift",
+          "sha256": "8739a3ac99a57120551a9d14ae470a45162266aeab0493033e3c64e7b22b13ef"
+        },
+        {
+          "path": "apple/StreamCore/AssetAvailability.swift",
+          "sha256": "a2ee353397c9b30d38ab5cc009a5bb6c6f8aaa37a344dc856fa4e870094af52e"
+        },
+        {
+          "path": "apple/StreamCore/AssetImportPlanner.swift",
+          "sha256": "8da096596f8e1fb929baa72afd429ddecad0e376c3cb14a99f872bc3d7740bf9"
+        },
+        {
+          "path": "apple/StreamCore/AssetLibrary.swift",
+          "sha256": "5a70b8b0d49798574f0ce8336e78c47e9ac9d860c356142fe30d8b6a0f654183"
+        },
+        {
+          "path": "apple/StreamCore/AudioInputMapping.swift",
+          "sha256": "6a49246b10b6ce3a1fedbff17e2ac2878e86dc907e6ba4393f9982f2693adf4d"
+        },
+        {
+          "path": "apple/StreamCore/AudioMixing.swift",
+          "sha256": "d927e71d52cfa7cc41bb26179a6dfed91da745e39978c96be0a15b61beb8b650"
+        },
+        {
+          "path": "apple/StreamCore/AudioRingBuffer.swift",
+          "sha256": "467612b0273fbca7b1a07f57bbb879aaac781caa78d4d793a92d8b41ba268e6b"
+        },
+        {
+          "path": "apple/StreamCore/BackgroundEffects.swift",
+          "sha256": "bae259348afad68c85d07deb7cde4fecea5b6d432a7b30a68f9ea44d37ed8347"
+        },
+        {
+          "path": "apple/StreamCore/BroadcastControl.swift",
+          "sha256": "b976adb0ffa6e28288fd53afd22cb9dfbfaf084ec82e840f34e850f656b9d393"
+        },
+        {
+          "path": "apple/StreamCore/BrowserOverlayConfig.swift",
+          "sha256": "7d64c48c5691eab764c51091fc677e3a7fc83c78af29b4ba8c65988e6c7a0c0e"
+        },
+        {
+          "path": "apple/StreamCore/CameraControlSettings.swift",
+          "sha256": "36f748d113d9f91f3609087a569f643dfc36bd9fae03aa693c2a54b7587499c7"
+        },
+        {
+          "path": "apple/StreamCore/CanonicalAudioConverter.swift",
+          "sha256": "06eb43d9ab0e9552e99d128afd95bcaa81eee162e2424a5a58cfdef0be83c999"
+        },
+        {
+          "path": "apple/StreamCore/ChannelFX.swift",
+          "sha256": "85c25257566b659f740c10a71046878eedb1bfec309726fb34005724c7f81e3d"
+        },
+        {
+          "path": "apple/StreamCore/ChannelFXProcessor.swift",
+          "sha256": "599af748e0b05bdcc0f4e91708ea1e5e46aeb46a1058850056c303b3b847e9a9"
+        },
+        {
+          "path": "apple/StreamCore/ChromaKey.swift",
+          "sha256": "e1a7792d1a808bd46d31b7d78c608363f2bd3eeaa8bd1af9fa8ae54cfcd0cef8"
+        },
+        {
+          "path": "apple/StreamCore/CubeLUT.swift",
+          "sha256": "c10de8787390ac403ff4c8262ecfe994ccf782a14a215efefa0523853dd83b31"
+        },
+        {
+          "path": "apple/StreamCore/DesktopResilience.swift",
+          "sha256": "e5cb0c9e52434f617afaeae97f27fa4756cd33ccf1c17eb7b2bc6aeb5acb780c"
+        },
+        {
+          "path": "apple/StreamCore/DesktopResourceBudget.swift",
+          "sha256": "6c8ae0733bb3688743e65d78ce879ac8593859909534c808df7629200f74c9a5"
+        },
+        {
+          "path": "apple/StreamCore/DestinationEncodingPlan.swift",
+          "sha256": "779ed02c58a85bd9d4af71691ab00bdaa31bef63bd86b24bd650f18578535354"
+        },
+        {
+          "path": "apple/StreamCore/DestinationProviderTemplate.swift",
+          "sha256": "c9ed0d388ec9e029debd8485db8121e37c999f64a201171f12297c90a62a002c"
+        },
+        {
+          "path": "apple/StreamCore/DestinationStore.swift",
+          "sha256": "f2992aed2ee1145ce9c1450fb2676e75861e1f938ec12901aa58b87b5ea61ff2"
+        },
+        {
+          "path": "apple/StreamCore/EchoHandling.swift",
+          "sha256": "7552abbc246098ed7dba7db55efb078fb2d09f3a4f60d21c17a8b2c836c5bbce"
+        },
+        {
+          "path": "apple/StreamCore/FeedbackRouteAnalyzer.swift",
+          "sha256": "22dbba00edf7ce92e41ef641462563edbaef28611fdb93c201897c6b876eadff"
+        },
+        {
+          "path": "apple/StreamCore/FrameTelemetry.swift",
+          "sha256": "f60d6f3ae3e23afcb599c8a1e82d1111c610b8e15602ca7cbdb0b38708cc6d2a"
+        },
+        {
+          "path": "apple/StreamCore/HostedAudioUnit.swift",
+          "sha256": "b0fbe9ec766042088d2beb852572ee70b97357c4d9f8b32f31165256271b24f8"
+        },
+        {
+          "path": "apple/StreamCore/HowlRiskDetector.swift",
+          "sha256": "0db2559ee30a8fab1a9f328ffb4e728002e897dcfcda5b998104dca6fdaae39f"
+        },
+        {
+          "path": "apple/StreamCore/ImageAssetValidator.swift",
+          "sha256": "29844517e0a6e06681ee74d4a3b747d484bd51b8e0dda7ce8fd84aee9979c3fe"
+        },
+        {
+          "path": "apple/StreamCore/KeychainStore.swift",
+          "sha256": "9b3f33e6f41bfdc6377d2b3c82704cbb5451e10e5f46ddfe952d52099ade4ca6"
+        },
+        {
+          "path": "apple/StreamCore/LiveStats.swift",
+          "sha256": "55389ce5f7687a7a45d130c48fc8414731f36268749db927ec8ca39adee87e24"
+        },
+        {
+          "path": "apple/StreamCore/ManagedProvider.swift",
+          "sha256": "f1e4f5b9f5e02a4ea621a33540f13fcc7eb1ada36fbaa631d5bd7f96a2452804"
+        },
+        {
+          "path": "apple/StreamCore/MediaTimelineNormalizer.swift",
+          "sha256": "8a16a2d7da153d3c7178afb55b783a14975f469b4001833d0dfbacd19b4942be"
+        },
+        {
+          "path": "apple/StreamCore/MicStallEvaluator.swift",
+          "sha256": "f44cc140a3099288c754909feec39cdf8a3ceb6832527267cbddfaffa898f295"
+        },
+        {
+          "path": "apple/StreamCore/MotionEasing.swift",
+          "sha256": "88d34845b9b6df7a6797b35a4b00f7dddbba60a29147df4315972c8d29268f1b"
+        },
+        {
+          "path": "apple/StreamCore/NetworkPathSnapshot.swift",
+          "sha256": "49f6ebf94953d9e279d57f0c3b5e3e6b986f545a4d7382b869b710ef248f9f6b"
+        },
+        {
+          "path": "apple/StreamCore/OutputCanvas.swift",
+          "sha256": "5a5c5832d101510a4e1b3f72215cef8e85e826b87cf484e6dcac641f9a14299f"
+        },
+        {
+          "path": "apple/StreamCore/OutputProfile.swift",
+          "sha256": "d37dfad0a5a6378dc39e85cca89445e98558848c7afd6f6f999b439af9a2b78b"
+        },
+        {
+          "path": "apple/StreamCore/PTZ.swift",
+          "sha256": "41c1535b57637336cc05452c91f907dc57f6928b571b00899d075b88bead2770"
+        },
+        {
+          "path": "apple/StreamCore/PathTransition.swift",
+          "sha256": "1655137e6fcfb551aab4d54cd25b7a4573d65865d4e9014ae35aacfaeac2433f"
+        },
+        {
+          "path": "apple/StreamCore/PortableShow.swift",
+          "sha256": "9f95980ee7a77ef7e9ed6aa19631f1cd8ccc9d2cfd22750334d39db7e9d2c607"
+        },
+        {
+          "path": "apple/StreamCore/PresentationDeck.swift",
+          "sha256": "a7376817f3e512d91b610a06b3e4a4403eb8b412d4eedb656b55d34ca3865ea1"
+        },
+        {
+          "path": "apple/StreamCore/ProviderAPI.swift",
+          "sha256": "85c2506546503e7a6b2a654a4e51e00fbcd017641bf862886801d26c74287271"
+        },
+        {
+          "path": "apple/StreamCore/ProviderCompletionReceipt.swift",
+          "sha256": "74b4d21fd5c1f46fa89c2bc042460fc65d6d4bafe7e3c25a98df915b1df312e5"
+        },
+        {
+          "path": "apple/StreamCore/ProviderOAuth.swift",
+          "sha256": "8d1b12da3b764e6df728df3b6d79c6446747f1032f6e45a3b69c65c7a04cfeb9"
+        },
+        {
+          "path": "apple/StreamCore/RawVideoResourceBudget.swift",
+          "sha256": "f608982f1ebf961838c66acf2d32b42c2802851dd1ebec0b0c1cf9d9e4fd1488"
+        },
+        {
+          "path": "apple/StreamCore/ReconnectBackoff.swift",
+          "sha256": "f50433e21e6a87675bcdcc9b87411971fb6970eeb5bb7db585c531d5ddb8338b"
+        },
+        {
+          "path": "apple/StreamCore/RecordingStore.swift",
+          "sha256": "94c0c811f02ac01373231c0c068f42bd36e9e1faa375fe05342b82a772e94438"
+        },
+        {
+          "path": "apple/StreamCore/RecoveryEventReview.swift",
+          "sha256": "28727ccc19aab52af17bc1b3520bbb97db7ddc41649e0adc241afd0771ac517d"
+        },
+        {
+          "path": "apple/StreamCore/RestreamAuthBroker.swift",
+          "sha256": "99072bd1afd4ef88cda485dd9d718d89a9627584f703360e9ae5ee593ddca076"
+        },
+        {
+          "path": "apple/StreamCore/RestreamIngest.swift",
+          "sha256": "77364a0071230a5b6f485109dc65cb2874c82e94ba4677ee4d51dbce732488a0"
+        },
+        {
+          "path": "apple/StreamCore/Rundown.swift",
+          "sha256": "684e6e8271ac32be5164ce9bc710277d6c5b88297303b3ff1e98868fcda41ef2"
+        },
+        {
+          "path": "apple/StreamCore/SessionRecovery.swift",
+          "sha256": "e186af15327901a8ae271909dc71d246ca4b6157007d911973f758f0a7686bdf"
+        },
+        {
+          "path": "apple/StreamCore/SettingsStore.swift",
+          "sha256": "0d9dfc2029b58f6d2ef3073f190e7747a3f424478733b2c0beb5ab9a653e09b7"
+        },
+        {
+          "path": "apple/StreamCore/SettingsValidator.swift",
+          "sha256": "122b4075e9b66490934a147f990a47fc76e156e3f372513ccbcdc12c67a048a4"
+        },
+        {
+          "path": "apple/StreamCore/StreamCapability.swift",
+          "sha256": "0f230c20778d0f91837b85e38fa845e300d445870b1859e7abe896a2da65bc7c"
+        },
+        {
+          "path": "apple/StreamCore/StreamDestination.swift",
+          "sha256": "142a14d2575b2cb120d3488a959f61bc7ca77b6b976beb39da557082e5a9d3b8"
+        },
+        {
+          "path": "apple/StreamCore/StreamPreflight.swift",
+          "sha256": "e18f03b39d8d6e25c8a4f645afeef56782ccd3482a8356ee77e863f3f141322c"
+        },
+        {
+          "path": "apple/StreamCore/StreamSettings.swift",
+          "sha256": "8e7842000e8bbc315abaeb5e332170300cbb859e23ce190a4d9f4bd8c9c4c526"
+        },
+        {
+          "path": "apple/StreamCore/StudioAudioDeviceRouting.swift",
+          "sha256": "762630373a775155b64809c61d275c3b35aae81fb1273c8d9bbf87efc8afe216"
+        },
+        {
+          "path": "apple/StreamCore/StudioProjects.swift",
+          "sha256": "9ed747092962027157963879e54662d26943693d4345495d4ff6dc280b84d106"
+        },
+        {
+          "path": "apple/StreamCore/TextLayout.swift",
+          "sha256": "b8fbb0414007052e1ef57624b92df3af6c89076136b1722b0b1060d02f1dbac7"
+        },
+        {
+          "path": "apple/StreamCore/ThroughputEstimator.swift",
+          "sha256": "47b6869e49cd9d4609734c50d390b07cf137ca5caa1e93c16b8751a21b294b2e"
+        },
+        {
+          "path": "apple/StreamCore/TickerOverlay.swift",
+          "sha256": "a8db2e02c12c4a245ac02b88d805d3bebb4994a7d04d61f15ea73b9cbd4c6682"
+        },
+        {
+          "path": "apple/StreamCore/TimerOverlay.swift",
+          "sha256": "5b757bf75637e589fe4e3eda39f5da665fd6d26d379237e641609f1320358eb1"
+        },
+        {
+          "path": "apple/StreamCore/TwitchDeviceAuthorization.swift",
+          "sha256": "3f45849957f94b1908635783d16c9f6a2acd26f75a79918dda12148b639cf3bb"
+        },
+        {
+          "path": "apple/StreamCore/TwitchIngest.swift",
+          "sha256": "2322becaae8f8a915480e083daced8e0bc3280357be3f4e073bfb3d1a35b0f10"
+        },
+        {
+          "path": "apple/StreamCore/UplinkProbe.swift",
+          "sha256": "7834cbac6c13bdd9447808e97d9a91e54e11ec1039f1663dc34ba4618ab13f0b"
+        },
+        {
+          "path": "apple/StreamCore/VideoFrameAdmission.swift",
+          "sha256": "12232c459ee1f009b36e2df4f776a5d29ad6a4887d827eddb2864ffebdfb2fbc"
+        },
+        {
+          "path": "apple/StreamCore/VoicePolishProcessor.swift",
+          "sha256": "3a2cae25be4f874459295310a71981a0b9b14e119d4a0525ab3ed6a96b5b8689"
+        },
+        {
+          "path": "apple/StreamCore/WatchdogEvaluator.swift",
+          "sha256": "cd3d4b4b0de339cbd04e7bb4b3dc14138d1266307d256855681c54e523375d10"
+        },
+        {
+          "path": "apple/StreamCore/WebMContainer.swift",
+          "sha256": "dee18517d58b4e2e28ea798e7563edd4dc7420fa96142b32a635c4d85ee0fe9f"
+        },
+        {
+          "path": "apple/StreamCore/YouTubeLiveStream.swift",
+          "sha256": "99711b8a04d39a463140f687a1719067039e64139c902d72957bd2975024c5f2"
+        },
+        {
+          "path": "apple/StreamCore/YouTubeStartReview.swift",
+          "sha256": "15bf58bb4822e785ebf334805a64d044d7f93fb186825109c37104f5a461d10d"
+        }
+      ],
+      "binarySHA256": "615de8c8e4c12153167c40725ca925e04b720b586ca5ad816b7c3d81050ca711",
+      "suppliedReceiptSHA256": "90a9aed6131746411c2d9ae8cc428d22da9f2c747dd445e1f18bae160ede35aa",
+      "freshCoreBuild": false
+    },
+    "unchangedAfterRuntime": true
+  },
+  "proofArtifacts": {
+    "retainedRoot": "/tmp/stream-owned-ending-active-writer-proof-20261022",
+    "pathConvention": "Each listed artifact path is relative to retainedRoot. Native source keys are relative to apple/. No media or executable bytes embedded.",
+    "bindings": [
+      {
+        "path": "artifacts.json",
+        "bytes": 1808,
+        "sha256": "13150cf5eb382fb5ba122ed0016a8215ff14ef49669cde68d7f3e175e8eaebc9"
+      },
+      {
+        "path": "commands.json",
+        "bytes": 2366,
+        "sha256": "0ea1f6338fda08bc9792132e048cc5447f3b7b213d9fd047d67fb659ee8af15b"
+      },
+      {
+        "path": "compile-result.json",
+        "bytes": 2159,
+        "sha256": "6dccf2e781e52cc7494a8350a1b67f2b9b7dffaa469dfd1ba2cfef937b8364f4"
+      },
+      {
+        "path": "compile.log",
+        "bytes": 10040,
+        "sha256": "406287f6c287e9e63ad02bead1b682b326464ca9a4ff831934017cec7e600868"
+      },
+      {
+        "path": "executable.json",
+        "bytes": 179,
+        "sha256": "bbe6b342940212e62a56798b9241112214ac9f325d79d11c2431f821cf0c8d2b"
+      },
+      {
+        "path": "host.json",
+        "bytes": 251,
+        "sha256": "0cf6a6e20fd067803b612a1d9457be651b57af95c789157a716ae89fa7209b81"
+      },
+      {
+        "path": "inputs.json",
+        "bytes": 15722,
+        "sha256": "71b353040fc45deec029bb4d55ad120c85791fd6358ceaa6fecaaae8fa044391"
+      },
+      {
+        "path": "media/program.mp4",
+        "bytes": 6678,
+        "sha256": "bc4e7c00c3a4cbf5f4fe332b6e1d14b8f8e8857b0879a67733737c0592111faf"
+      },
+      {
+        "path": "media/program.mp4.recording.json",
+        "bytes": 868,
+        "sha256": "cb220335c8ebf57b52704bbb8c8e069ad00bf7206d0f6d89ca9a2e84fdd05ce1"
+      },
+      {
+        "path": "media/result.json",
+        "bytes": 804,
+        "sha256": "c726f88ab4823bedec67a3f9e385b9c12764f53bbacc0cb054842cb21ad6e84b"
+      },
+      {
+        "path": "owned-ending-harness",
+        "bytes": 4818680,
+        "sha256": "55ac7fe2f30ba076b8b8b51a59171a005859afc112fbdb7a461e6f46521bb0f3"
+      },
+      {
+        "path": "result.json",
+        "bytes": 2990,
+        "sha256": "eb9e190074ffda4ba7fc0f10c33bf95c74b62840646a86191cfa19126b0917e0"
+      },
+      {
+        "path": "run_proof.py",
+        "bytes": 5072,
+        "sha256": "616a3f2bdc21e9586e074ace29cb704da993bb05351c1efc431d738047df16e7"
+      },
+      {
+        "path": "runtime-result.json",
+        "bytes": 432,
+        "sha256": "09ec8e11d1ec5917f2a9257f6b911803984a58953c40d9a39c7dbd4d5f6205e5"
+      },
+      {
+        "path": "runtime.log",
+        "bytes": 1714,
+        "sha256": "e5fb539c534f68304c0fb11c9be822d135420d1a950dd70c38e70750581f7a17"
+      },
+      {
+        "path": "source-after.json",
+        "bytes": 3305,
+        "sha256": "c76cab5dd371e96f37ffb48a72de183dd9a2f4e73fc5ac701e2d088b129978db"
+      }
+    ]
+  },
+  "commands": {
+    "compile": [
+      "/usr/bin/xcrun",
+      "swiftc",
+      "-j2",
+      "-swift-version",
+      "6",
+      "-parse-as-library",
+      "-D",
+      "STREAM_NATIVE_VALIDATION",
+      "-F",
+      "/private/tmp/stream-owned-ending-active-writer-proof-20261022/frameworks",
+      "-framework",
+      "StreamCore",
+      "-Xlinker",
+      "-rpath",
+      "-Xlinker",
+      "/private/tmp/stream-owned-ending-active-writer-proof-20261022/frameworks",
+      "StreamMac/ProviderHTTP.swift",
+      "StreamMac/ProviderTokenVault.swift",
+      "StreamMac/OAuthLoopbackReceiver.swift",
+      "StreamMac/StudioChatModel.swift",
+      "StreamMac/StudioDirectChatModel.swift",
+      "StreamMac/StudioChatSocket.swift",
+      "StreamMac/StudioChatOutbox.swift",
+      "StreamMac/StudioDirectChatManager.swift",
+      "StreamMac/ProviderPendingCatalog.swift",
+      "StreamMac/ProviderAccountSession.swift",
+      "StreamBroadcast/Publisher.swift",
+      "StreamMac/SessionState.swift",
+      "StreamMac/RawVideoResourceCoordinator.swift",
+      "StreamMac/FrameDeliveryBroker.swift",
+      "StreamMac/FrameDeliveryConverter.swift",
+      "StreamMac/DestinationVideoIngress.swift",
+      "StreamMac/DestinationOutputController.swift",
+      "StreamMac/DestinationEncodedMailbox.swift",
+      "StreamMac/DestinationSharedEncoder.swift",
+      "StreamMac/IsolatedRecordingTypes.swift",
+      "StreamMac/IsolatedVideoTypes.swift",
+      "StreamMac/RecordingChatPaint.swift",
+      "StreamMac/RecordingChatTypes.swift",
+      "StreamMac/RecordingFrameDelivery.swift",
+      "StreamMac/RecordingChatArchive.swift",
+      "StreamMac/RecordingChatReader.swift",
+      "StreamMac/RecordingPreferences.swift",
+      "StreamMac/ProgramRecordingSession.swift",
+      "scripts/program_recording_fixtures.swift",
+      "scripts/owned_ending_harness.swift",
+      "-o",
+      "/private/tmp/stream-owned-ending-active-writer-proof-20261022/owned-ending-harness"
+    ],
+    "runtime": [
+      "/private/tmp/stream-owned-ending-active-writer-proof-20261022/owned-ending-harness"
+    ],
+    "cwd": "/tmp/stream-owned-ending-recording-readiness-20261022/apple",
+    "environmentOverrides": {
+      "DYLD_FRAMEWORK_PATH": "/private/tmp/stream-owned-ending-active-writer-proof-20261022/frameworks",
+      "OWNED_ENDING_MEDIA_DIR": "/private/tmp/stream-owned-ending-active-writer-proof-20261022/media",
+      "STREAM_FIXTURE_AUDIO_DECODER": null
+    },
+    "compileDeadlineSeconds": 300,
+    "runtimeDeadlineSeconds": 120
+  },
+  "observedResult": {
+    "success": true,
+    "compile": {
+      "phase": "compile",
+      "command": [
+        "/usr/bin/xcrun",
+        "swiftc",
+        "-j2",
+        "-swift-version",
+        "6",
+        "-parse-as-library",
+        "-D",
+        "STREAM_NATIVE_VALIDATION",
+        "-F",
+        "/private/tmp/stream-owned-ending-active-writer-proof-20261022/frameworks",
+        "-framework",
+        "StreamCore",
+        "-Xlinker",
+        "-rpath",
+        "-Xlinker",
+        "/private/tmp/stream-owned-ending-active-writer-proof-20261022/frameworks",
+        "StreamMac/ProviderHTTP.swift",
+        "StreamMac/ProviderTokenVault.swift",
+        "StreamMac/OAuthLoopbackReceiver.swift",
+        "StreamMac/StudioChatModel.swift",
+        "StreamMac/StudioDirectChatModel.swift",
+        "StreamMac/StudioChatSocket.swift",
+        "StreamMac/StudioChatOutbox.swift",
+        "StreamMac/StudioDirectChatManager.swift",
+        "StreamMac/ProviderPendingCatalog.swift",
+        "StreamMac/ProviderAccountSession.swift",
+        "StreamBroadcast/Publisher.swift",
+        "StreamMac/SessionState.swift",
+        "StreamMac/RawVideoResourceCoordinator.swift",
+        "StreamMac/FrameDeliveryBroker.swift",
+        "StreamMac/FrameDeliveryConverter.swift",
+        "StreamMac/DestinationVideoIngress.swift",
+        "StreamMac/DestinationOutputController.swift",
+        "StreamMac/DestinationEncodedMailbox.swift",
+        "StreamMac/DestinationSharedEncoder.swift",
+        "StreamMac/IsolatedRecordingTypes.swift",
+        "StreamMac/IsolatedVideoTypes.swift",
+        "StreamMac/RecordingChatPaint.swift",
+        "StreamMac/RecordingChatTypes.swift",
+        "StreamMac/RecordingFrameDelivery.swift",
+        "StreamMac/RecordingChatArchive.swift",
+        "StreamMac/RecordingChatReader.swift",
+        "StreamMac/RecordingPreferences.swift",
+        "StreamMac/ProgramRecordingSession.swift",
+        "scripts/program_recording_fixtures.swift",
+        "scripts/owned_ending_harness.swift",
+        "-o",
+        "/private/tmp/stream-owned-ending-active-writer-proof-20261022/owned-ending-harness"
+      ],
+      "pid": 90591,
+      "processGroup": 90591,
+      "exitCode": 0,
+      "timedOut": false,
+      "deadlineSeconds": 300,
+      "elapsedSeconds": 8.68860470900836,
+      "cleanup": [],
+      "reaped": true,
+      "ownedProcessGroupAbsent": true,
+      "logSHA256": "406287f6c287e9e63ad02bead1b682b326464ca9a4ff831934017cec7e600868"
+    },
+    "runtime": {
+      "phase": "runtime",
+      "command": [
+        "/private/tmp/stream-owned-ending-active-writer-proof-20261022/owned-ending-harness"
+      ],
+      "pid": 90641,
+      "processGroup": 90641,
+      "exitCode": 0,
+      "timedOut": false,
+      "deadlineSeconds": 120,
+      "elapsedSeconds": 2.2662333750049584,
+      "cleanup": [],
+      "reaped": true,
+      "ownedProcessGroupAbsent": true,
+      "logSHA256": "e5fb539c534f68304c0fb11c9be822d135420d1a950dd70c38e70750581f7a17"
+    },
+    "sourcesUnchanged": true,
+    "nativeInvocationCount": 1,
+    "originalProgramRecordingSession": true,
+    "scope": "one controlled local arm64 fixture; not hosted Intel remediation or cause proof"
+  },
+  "host": {
+    "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "macVersion": [
+      "27.2",
+      [
+        "",
+        "",
+        ""
+      ],
+      "arm64"
+    ],
+    "driverSHA256": "616a3f2bdc21e9586e074ace29cb704da993bb05351c1efc431d738047df16e7"
+  },
+  "mediaAndEventReceipt": {
+    "phase": "all-media-and-ending-oracles-passed",
+    "recordedAt": 814411972.393138,
+    "recording": {
+      "active": true,
+      "history": [
+        {
+          "elapsedSeconds": 0.15198299998883158,
+          "event": "recording"
+        }
+      ]
+    },
+    "writer": {
+      "completed": true,
+      "progress": {
+        "audioEndSeconds": 1,
+        "audioSamples": 100,
+        "audioStatus": "complete",
+        "avEndDifferenceSeconds": 0,
+        "availableBytes": 2233192701952,
+        "bytesWritten": 6678,
+        "droppedAudio": 0,
+        "droppedVideo": 0,
+        "durationSeconds": 1,
+        "elapsedWallSeconds": 1.4317539930343628,
+        "sessionStartSourceSeconds": 10000,
+        "videoEndSeconds": 1,
+        "videoSamples": 60,
+        "videoStatus": "complete"
+      },
+      "recoverable": false
+    }
+  },
+  "decodedMedia": {
+    "inspector": "unchanged ProgramRecordingFixtures.inspect(expectedDuration:1,checkSync:true), AVAssetReader",
+    "durationSeconds": 1,
+    "videoSamples": 60,
+    "flashSeconds": 0.5,
+    "toneSeconds": 0.5000416666666667,
+    "cueDifferenceSeconds": 4.16666666667e-05,
+    "noAdditionalDecode": true
+  },
+  "assertionsPreserved": [
+    "exact60 writer video samples and100 PCM input chunks",
+    "one-second H264/AAC, one video and one audio track; original <40ms track-start gate (observed offsets both zero)",
+    "original60ms decoded flash/tone gate and80ms duration/end-alignment gates",
+    "original production three-second final drain deadline",
+    "original five-second bounded fixture readiness helper",
+    "one explicit same-owner remote mutation; zero replay",
+    "independent local stop; healthy publisher receives60 frames with zero stop"
+  ],
+  "retentionContract": {
+    "optInEnvironment": "OWNED_ENDING_MEDIA_DIR",
+    "freshDirectory": "atomic mkdir0700; existing entry refuses; opt-in directory is never deleted",
+    "default": "original UUID temporary directory with deferred removal",
+    "eventHistoryBound": 64,
+    "snapshotActiveMeaning": "last observed recording/paused/failed event state; not authoritative writer running state after completion",
+    "resultFile": "latest checkpoint only; writer result written before original fatal/decode assertions",
+    "ciDirectory": "apple/build/owned-ending-media",
+    "ciAlwaysUpload": true
+  },
+  "originalHostedFailure": {
+    "run": 39877849256,
+    "job": 120172937931,
+    "source": "80afed5",
+    "logPath": "/tmp/stream-ci-80afed5-120172937931-original.log",
+    "logSHA256": "3bafa3bdf897984472290d0a9d764a8c42bfe5273d1804f65ec0d09078d3a624",
+    "terminalReportPath": "/tmp/stream-ci-80afed5-terminal-report-20261022.json",
+    "terminalReportSHA256": "7ca12a9a1eae1565deddc2797d90d1162cf68a06195f1d23d0274d24dbba3c3c",
+    "assertionLine": 16347,
+    "videoSamples": 34,
+    "audioSamples": 100,
+    "videoEndSeconds": 0.5666458333333333,
+    "audioEndSeconds": 1,
+    "drainDeadlineFailureRetained": true,
+    "cause": "unresolved by this local fixture proof"
+  },
+  "qualificationLimits": [
+    "one local arm64 macOS27.2 run, not hosted Intel qualification or repair proof",
+    "no original-source rerun or claim that wall-clock codec performance improved",
+    "original shipping ProgramRecordingSession unchanged; proposed audio-EOS correction not included",
+    "controlled memory credential stores, fake provider HTTP and fake publishers; actual native file writer and decoder",
+    "no actual provider network, device/audio playback/capture, physical hardware graph, camera, UI or OS-default changes",
+    "event observer proves actual accepted media before ending actions, not continuous encoded throughput",
+    "existing-path refusal, compiler-failure and runtime-timeout retention branches source reviewed, not separately executed"
+  ]
+}
