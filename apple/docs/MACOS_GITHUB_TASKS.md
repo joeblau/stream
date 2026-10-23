@@ -1583,3 +1583,52 @@ unchanged original bodies/states and zero open PRs/outside open issues. Every
 open tracker has incomplete children. All historical wave objects and failed
 receipts remain intact; this ledger update performs no native test, build,
 workload, API write or publication.
+
+## Terminal audio contract, hosted boundaries and combined build — 2026-10-23 UTC
+
+Exact `43151fd` passes generation, unsigned universal arm64/x86_64 Release and
+bundle audit with the terminal-audio production repair included. Current
+`ee5e280` has the **same 851 selected paths, every selected hash and vendor**;
+only two proof documents follow that build. This is a new combined app build,
+not the earlier 57c-only build with recipe exceptions.
+
+- Terminal audio now marks its native writer input finished once the known
+  boundary is reached and its queue is empty, closing admission before EOS.
+  Controlled actual-writer tests complete 60 video/100 audio; missing-tail EOS
+  waits for the last real PCM. Exact parent source compiles then fails the
+  intended 59/100 three-second drain oracle. This proves an SDK contract fix,
+  not the original Intel readiness state or its remediation. Original timing,
+  duration/decode/sync assertions and deadlines remain.
+- The ending fixture separately waits for the actual recording event before
+  actions, with retained movie/writer/event evidence. One controlled native
+  writer run passes 60/100 and the original decoder/sync checks **without the
+  EOS repair**. Fixture provider/publisher boundaries remain explicit.
+- First hosted genuine external AX baselines and the production scene action
+  pass at exact 9f9. The subsequent keyboard oracle remains **UNQUALIFIED 77**:
+  the window is visible/non-key and app inactive; cause is unknown. This is
+  component evidence, not full studio keyboard/focus/window acceptance.
+- New shared-encoder phase preparation passes generated-source parsing and
+  standalone strict helper typechecking once. It does **not** full-typecheck or
+  execute the fixture/controller, observe a new stop outcome or repair the
+  original timeout. Diagnostic scope is limited to the intended fixture.
+
+Exact instrumented f7d performance fails on both architectures despite both generated targets building and all four source-bound traces completing/reconciling. ARM renders 17,215/17,026 and Intel 17,103/17,223 versus 17,850. Both writers finish; ARM inspections complete, Intel first completes in 96.079958 seconds and second remains terminally incomplete at the original 1,380-second teardown. Persisted 0.218495 seconds is pre-inspection bookkeeping, not completed duration. All available replay-source frames decode (17,214 ARM; 17,103 Intel); nominal replay failures depend on first recordings. Writer A/V drops are zero; Intel replay separately has one retired ingress intent. No CPU/GPU/kernel/executor/host cause or representative observer overhead is established. Complete traces narrow observed boundaries, not cause:
+ARM entry lateness is mostly present by observed sleep return, while Intel has
+mixed long-body/entry intervals. Whole-tick wall time includes waits/scheduling.
+Complete traces, zero writer A/V drops and actual-source decoding do not
+convert failed capacity/deadline gates into passes. The archived executable
+hashes are receipt-only, not independent rehashes of retained binary bytes.
+
+Exact 80af native CI is terminal FAILURE on both Macs, with iOS success. Core passes 613 tests across 84 suites on ARM/Intel/iOS in 82.002/184.384/195.264 seconds. Corrected direct-chat harness passes on both hosts before later failures: Intel owned-ending writer drains only 34 video/100 audio, then its production finalization deadline fails; ARM normal shared-encoder invocation reaches publisher-stop wait and exceeds the original 90-second bound. Causes remain separate and unproven. Exact 9f9 CI remains active at 2026-10-23T01:50:56.967816+00:00; iOS 613/84 passes in 229.562 seconds, both Macs remain active. No whole Mac CI PASS. The later EOS and fixture controls do not relabel these
+original failed jobs; actual source and event boundaries remain separately bound.
+
+The fresh complete read-only audit at **2026-10-23T01:48:24.645602+00:00** confirms
+original 61 issues **27 closed / 34 open**, all 135 macOS issues **101 closed /
+34 open**, unchanged original bodies/states and zero open PRs/outside open
+issues. Every open tracker still has incomplete children; no closure candidate.
+For #155, original native keyboard workflow validation remains incomplete, but
+no specific successful chooser, human input or physical Finder/pointer gesture
+is prescribed. #90 and #92 remain bounded by their whole original criteria,
+without invented physical/manual-only or universal hardware requirements.
+All prior wave objects and failed receipts remain unchanged. This ledger work
+performs no native test, build, workload, API write, dispatch or publication.
