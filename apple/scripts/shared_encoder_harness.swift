@@ -251,6 +251,13 @@ private actor EncodedPublisherProbe: Publisher {
             let listen = transport == .srt ? ["-i", "srt://127.0.0.1:\(port)?mode=listener&latency=50000"] : ["-listen", "1", "-i", "rtmp://127.0.0.1:\(port)/live/shared"]
             process.arguments = ["-y", "-hide_banner", "-loglevel", "error"] + listen + ["-map", "0:v:0", "-map", "0:a:0", "-c", "copy", file.path]
             process.standardOutput = handle; process.standardError = handle
+            let observedTransport = transport.rawValue
+            process.terminationHandler = { terminated in
+                SharedEncoderStopDiagnostics.record("localhost.receiverExit", "OBSERVED", fields: [
+                    "transport": observedTransport, "pid": String(terminated.processIdentifier),
+                    "terminationStatus": String(terminated.terminationStatus),
+                    "terminationReason": terminated.terminationReason == .exit ? "exit" : "uncaughtSignal"])
+            }
             try process.run(); processes.append(process)
             receiverReceipts.append(["transport": transport.rawValue, "pid": process.processIdentifier,
                 "port": port, "stdoutStderr": log.path, "media": file.path])
@@ -297,7 +304,7 @@ private actor EncodedPublisherProbe: Publisher {
         outputs.stopAll()
         phase("localhost.stopAll", "END")
         // FFmpeg closes its input without replying to RTMP Unpublish.Success.
-        // HaishinKit waits its documented 3-second request timeout before local
+        // The actual RTMPPublisher connection uses a 5-second request timeout before local
         // teardown completes; the encoder itself must already be finalized.
         phase("localhost.waitEncoderEOS", "BEGIN")
         try await settle { outputs.encoderSessionCount == 0 }

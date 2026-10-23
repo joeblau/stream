@@ -4,6 +4,7 @@ cd "${0:A:h:h}"
 readonly SHARED_ENCODER_DIR="build/shared-encoder-validation"
 readonly SHARED_ENCODER_BUILD_PATH="${SHARED_ENCODER_BUILD_PATH:-$SHARED_ENCODER_DIR/derived}"
 mkdir -p "$SHARED_ENCODER_DIR"
+python3 scripts/prepare_shared_encoder_stop_diagnostics.py "$SHARED_ENCODER_DIR"
 ruby -ryaml -rjson - "$SHARED_ENCODER_DIR" <<'RUBY'
 root=Dir.pwd
 folder=ARGV[0]
@@ -26,7 +27,9 @@ target['type']='tool'
 target['settings'] ||= {}
 target['settings']['base'] ||= {}
 target['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']='$(inherited) STREAM_NATIVE_VALIDATION'
-target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift']}
+target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift','DestinationOutputController.swift']}
+target['sources'] << File.join(root,folder,'stop-diagnostics/DestinationOutputController.swift')
+target['sources'] << File.join(root,'scripts/SharedEncoderStopDiagnostics.swift')
 target['sources'] << File.join(root,'scripts/shared_encoder_harness.swift')
 target['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
 spec['targets']['SharedEncoderHarness']=target
