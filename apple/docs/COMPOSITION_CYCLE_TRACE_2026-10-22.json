@@ -1,0 +1,302 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-22",
+  "issue": 92,
+  "baseCommit": "d0ec6ff952052ce0e66c17acb247702f065d8dfd",
+  "result": "PASS corrected actual helper/scheduler TSan proof and generated parse; first fixture failure retained",
+  "scope": "Diagnostic-only generated input path. No shipping source, workload content, clock/deadline/FPS/PTS, numeric gate or resource/recipient policy changes. No media/capture/UI/network/API/SDK/fullCore/App build or performance workload execution. No original#92 capacity qualification or cause/throughput fix claimed.",
+  "sourceSHA256": {
+    "apple/scripts/composition_cycle_trace.swift": "9a2bf9972074ffb9b478e3c7c88e15b3f6f638a9f5fae7e2e03418fb2df730bd",
+    "apple/scripts/prepare_composition_cycle_trace.py": "cc294cbb67317566c87631e330201d013d5645983e44f33f463d0935e9a7be2d",
+    "apple/scripts/retain_composition_cycle_trace_inputs.py": "de5971642c84a2ab60d135fe661c9a3e7c70b97c12888efd45a938910ab165b1",
+    "apple/scripts/test_composition_cycle_trace.py": "d214b84f24ee06bae4c7fc06b6b703063eda98b3d08d9f48bff0f8ef5c9988b4",
+    "apple/scripts/run_studio_performance_harness.zsh": "8df33bfff8f729ab76908fc32c4c24b2801f906d4b7c6feb8ac095360236f4d9",
+    "apple/scripts/composition_cycle_trace_harness.swift": "d26851206a87e350219f637d39cae9696c05dae1275dd85f94ba8851023fd116",
+    "apple/docs/COMPOSITION_CYCLE_TRACE.md": "ae7952d51781d76c1e7ee8e544b91ef48450c771352927547169577b117423c0"
+  },
+  "sourceOnlyProof": {
+    "receipt": "/tmp/stream-wave23-composition-cycle-trace-20261022/apple/build/composition-cycle-trace-source-freeze-v3-20261022/result.json",
+    "sha256": "106ac3e73f391b143b480830e7be507e5f6342ebc81ae4b7b7bd4957152fd0d4",
+    "pythonTestsPassed": 11,
+    "zshSyntaxPassed": true,
+    "sourceGenerationPassed": true,
+    "nativeClaim": false
+  },
+  "firstOutcome": {
+    "receipt": "/tmp/stream-wave24-cycle-trace-native-proof-20261022/receipt.json",
+    "sha256": "670904fdc3b3a37acd2b690e096d1b2abf7418983ad69ea9d2046b77e7b0988b",
+    "compileExit": 0,
+    "runtimeExit": -5,
+    "failure": "Owned fixture integer adapter accepted Int only; actual helper pendingCommitIteration stores Int64. Failed at unresolved-state assertion; no retry or generated parse in this first invocation.",
+    "helperDefectEstablished": false,
+    "originalArtifactsPreserved": true,
+    "remainingCasesAndCalibrationReached": false
+  },
+  "correctedOutcome": {
+    "receipt": "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/receipt.json",
+    "sha256": "d2d4b67f875dc116c3c1ba7c72cde8489e3556156f4d807822c57615eb015209",
+    "changes": "Only fixture exact Int/Int64 adapter, Int and Int64 sanity assertions and unbuffered output. All original assertions and frozen six owner sources preserved.",
+    "stages": [
+      {
+        "name": "toolchain",
+        "command": [
+          "xcrun",
+          "swiftc",
+          "--version"
+        ],
+        "deadlineSeconds": 15,
+        "startedAt": "2026-10-23T00:41:07.071021+00:00",
+        "pid": 72892,
+        "exitCode": 0,
+        "seconds": 0.13043008399836253,
+        "logSHA256": "3b4a3b2b62ae9c617dc647977e9947fc8e792a85716a2c4e8ce549997ddc342a",
+        "ownedChildReaped": true
+      },
+      {
+        "name": "host",
+        "command": [
+          "sysctl",
+          "-n",
+          "hw.model",
+          "machdep.cpu.brand_string",
+          "hw.ncpu",
+          "hw.memsize"
+        ],
+        "deadlineSeconds": 15,
+        "startedAt": "2026-10-23T00:41:07.202074+00:00",
+        "pid": 72894,
+        "exitCode": 0,
+        "seconds": 0.0034943330101668835,
+        "logSHA256": "02c73cde701cccad62b91bd17de475bf74d4c56e563834eb6b6b1d8604320c85",
+        "ownedChildReaped": true
+      },
+      {
+        "name": "os",
+        "command": [
+          "sw_vers"
+        ],
+        "deadlineSeconds": 15,
+        "startedAt": "2026-10-23T00:41:07.205828+00:00",
+        "pid": 72895,
+        "exitCode": 0,
+        "seconds": 0.020903333002934232,
+        "logSHA256": "0391a2ab85afbe8eaff4a86d5792bf9617f4b30a2950354a29b0fbdbc511ed6e",
+        "ownedChildReaped": true
+      },
+      {
+        "name": "compile",
+        "command": [
+          "xcrun",
+          "swiftc",
+          "-swift-version",
+          "6",
+          "-strict-concurrency=complete",
+          "-parse-as-library",
+          "-O",
+          "-j2",
+          "-sanitize=thread",
+          "/private/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/inputs/CompositionCycleTrace.swift",
+          "/private/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/inputs/CompositionFrameSchedule.swift",
+          "/private/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/CycleTraceNativeHarness.swift",
+          "-o",
+          "/private/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/CycleTraceNativeProof"
+        ],
+        "deadlineSeconds": 180,
+        "startedAt": "2026-10-23T00:41:07.227089+00:00",
+        "pid": 72896,
+        "exitCode": 0,
+        "seconds": 2.236607583006844,
+        "logSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "ownedChildReaped": true
+      },
+      {
+        "name": "runtime",
+        "command": [
+          "/private/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/CycleTraceNativeProof",
+          "/private/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/native-result.json"
+        ],
+        "deadlineSeconds": 60,
+        "startedAt": "2026-10-23T00:41:09.464467+00:00",
+        "pid": 72908,
+        "exitCode": 0,
+        "seconds": 2.6295135830005165,
+        "logSHA256": "ef4f5bf957f3780fd39de82412efdbfbc29f6dc019a8e0433b4d6b3fcef2516a",
+        "ownedChildReaped": true
+      },
+      {
+        "name": "generated-parse",
+        "command": [
+          "xcrun",
+          "swiftc",
+          "-frontend",
+          "-parse",
+          "-swift-version",
+          "6",
+          "-parse-as-library",
+          "/tmp/stream-wave23-composition-cycle-trace-20261022/apple/build/composition-cycle-trace-source-freeze-v3-20261022/generated/CompositionEngine.swift",
+          "/tmp/stream-wave23-composition-cycle-trace-20261022/apple/build/composition-cycle-trace-source-freeze-v3-20261022/generated/CompositionCycleTrace.swift",
+          "/tmp/stream-wave23-composition-cycle-trace-20261022/apple/build/composition-cycle-trace-source-freeze-v3-20261022/generated/studio_performance_harness.swift"
+        ],
+        "deadlineSeconds": 60,
+        "startedAt": "2026-10-23T00:41:12.097719+00:00",
+        "pid": 72918,
+        "exitCode": 0,
+        "seconds": 0.1335747499979334,
+        "logSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "ownedChildReaped": true
+      }
+    ],
+    "outcomes": [
+      "fixture adapter accepts Int and exact Int64",
+      "actual unchanged scheduler negative/due/exact-equality edges",
+      "real helper accepted committed categories telescope 1+2+2=5",
+      "supplied rejected/stale and nil-self spans never fabricate commits",
+      "distinct run authorities and counters never cross epochs",
+      "unresolved commit remains incomplete even with exit observation",
+      "never-started and unexited runs cannot report complete",
+      "pending sleep explicit; post-freeze canceled/commit/cycle/exit writes immutable",
+      "actual helper paired successful/canceled sleep endpoints",
+      "duplicate/nonmonotonic/orphan cycle/commit/sleep evidence refused",
+      "fixed 65536 event capacity; omission invalidates completeness",
+      "bounded concurrent append/snapshot freeze under ThreadSanitizer"
+    ],
+    "calibration": {
+      "clockReadLoopNanoseconds": 388084,
+      "iterations": 10000,
+      "observerLoopNanoseconds": 14642667,
+      "observerPerIterationNanoseconds": 1464.2667,
+      "scope": "Helper-only scalar/lock/store plus synthetic span construction; ThreadSanitizer/optimizer perturbed. Not representative frame cost, pure lock cost or subtraction-based throughput estimate."
+    },
+    "tsanRequested": true,
+    "tsanOptions": "halt_on_error=1:exitcode=66",
+    "tsanDynamicLibraryLoadCommandPresent": true,
+    "tsanLibraryNames": [
+      "@rpath/libclang_rt.tsan_osx_dynamic.dylib"
+    ],
+    "runtimeResult": "PASS",
+    "sourceBeforeAfterEqual": true,
+    "ownedChildrenReaped": true,
+    "generatedParseOnly": true,
+    "fullEngineTypecheckOrRuntime": false
+  },
+  "samplingIntegrity": "Export occurs after original media frontier/PCM/recording finish, sampled metrics/resources and first durable original case journal. Supplemental export errors do not replace original cases or gates. Trace storage uses a bounded per-run lock because original weak-self Task is not assumed actor-inherited; observer lock/store cost can affect current sleep/yield and later timing. Frozen state is copied under lock; validation/serialization outside.",
+  "remaining": "Actual generated target build/typecheck, hosted attribution and representative observer-cost interpretation remain pending. Helper-only optimized/TSan loop is not frame cost, pure lock cost, VM-cause evidence or capacity qualification. All original17850/600s/80ms/1380s gates and old failure receipts remain.",
+  "artifacts": {
+    "/tmp/stream-wave24-cycle-trace-native-proof-20261022/os.log": {
+      "bytes": 64,
+      "sha256": "0391a2ab85afbe8eaff4a86d5792bf9617f4b30a2950354a29b0fbdbc511ed6e"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-20261022/CycleTraceNativeHarness.swift": {
+      "bytes": 13245,
+      "sha256": "c20a0da290b0826f4a242a83f6526eead6806a9877ff5f2a1c2c6c42ffa289ea"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-20261022/CycleTraceNativeProof": {
+      "bytes": 203896,
+      "sha256": "875e6c56cd408b4755e7d93df01516cf35045bd0107fd58b5f812fc141fbd8fd"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-20261022/compile.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-20261022/runtime.log": {
+      "bytes": 104,
+      "sha256": "d4a5396939c4cae42bf69ea32e154d064ab17f10cd24d145d6d4b6dd00419dc5"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-20261022/driver.py": {
+      "bytes": 5149,
+      "sha256": "420a6484b7846c790b6f3af55f3978e0e965611d072015806b6035ce8b5bd7ec"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-20261022/toolchain.log": {
+      "bytes": 128,
+      "sha256": "3b4a3b2b62ae9c617dc647977e9947fc8e792a85716a2c4e8ce549997ddc342a"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-20261022/host.log": {
+      "bytes": 37,
+      "sha256": "02c73cde701cccad62b91bd17de475bf74d4c56e563834eb6b6b1d8604320c85"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-20261022/receipt.json": {
+      "bytes": 7696,
+      "sha256": "670904fdc3b3a37acd2b690e096d1b2abf7418983ad69ea9d2046b77e7b0988b"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-20261022/inputs/CompositionCycleTrace.swift": {
+      "bytes": 12043,
+      "sha256": "9a2bf9972074ffb9b478e3c7c88e15b3f6f638a9f5fae7e2e03418fb2df730bd"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-20261022/inputs/CompositionFrameSchedule.swift": {
+      "bytes": 869,
+      "sha256": "02dab6e6d3dbe79c8f124bde5a57dff7598e7901995a54946e7f8446c995bf1b"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/os.log": {
+      "bytes": 64,
+      "sha256": "0391a2ab85afbe8eaff4a86d5792bf9617f4b30a2950354a29b0fbdbc511ed6e"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/CycleTraceNativeHarness.swift": {
+      "bytes": 13704,
+      "sha256": "d26851206a87e350219f637d39cae9696c05dae1275dd85f94ba8851023fd116"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/generated-parse.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/CycleTraceNativeProof": {
+      "bytes": 205560,
+      "sha256": "7b2eb33e91643001d5c0c7f7cd728d3247ab1fad7c9b8f500df50dd60d65e913"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/compile.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/native-result.json": {
+      "bytes": 1536,
+      "sha256": "c7b1a7cc19c1c1b88ec5eca725f0b611864e9ca883ac1ebc1e42fcf6c730318f"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/runtime.log": {
+      "bytes": 2334,
+      "sha256": "ef4f5bf957f3780fd39de82412efdbfbc29f6dc019a8e0433b4d6b3fcef2516a"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/driver.py": {
+      "bytes": 5149,
+      "sha256": "420a6484b7846c790b6f3af55f3978e0e965611d072015806b6035ce8b5bd7ec"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/toolchain.log": {
+      "bytes": 128,
+      "sha256": "3b4a3b2b62ae9c617dc647977e9947fc8e792a85716a2c4e8ce549997ddc342a"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/host.log": {
+      "bytes": 37,
+      "sha256": "02c73cde701cccad62b91bd17de475bf74d4c56e563834eb6b6b1d8604320c85"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/receipt.json": {
+      "bytes": 9771,
+      "sha256": "d2d4b67f875dc116c3c1ba7c72cde8489e3556156f4d807822c57615eb015209"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/inputs/CompositionCycleTrace.swift": {
+      "bytes": 12043,
+      "sha256": "9a2bf9972074ffb9b478e3c7c88e15b3f6f638a9f5fae7e2e03418fb2df730bd"
+    },
+    "/tmp/stream-wave24-cycle-trace-native-proof-corrected-20261022/inputs/CompositionFrameSchedule.swift": {
+      "bytes": 869,
+      "sha256": "02dab6e6d3dbe79c8f124bde5a57dff7598e7901995a54946e7f8446c995bf1b"
+    },
+    "/tmp/stream-wave23-composition-cycle-trace-20261022/apple/build/composition-cycle-trace-source-freeze-v3-20261022/result.json": {
+      "bytes": 6681,
+      "sha256": "106ac3e73f391b143b480830e7be507e5f6342ebc81ae4b7b7bd4957152fd0d4"
+    },
+    "/tmp/stream-wave23-composition-cycle-trace-20261022/apple/build/composition-cycle-trace-source-freeze-v3-20261022/generated/manifest.json": {
+      "bytes": 10779,
+      "sha256": "a624af0b6972aae17b88c0dbf069886a93634ef1387bb33e988bb7169063fafd"
+    },
+    "/tmp/stream-wave23-composition-cycle-trace-20261022/apple/build/composition-cycle-trace-source-freeze-v3-20261022/python-tests.log": {
+      "bytes": 110,
+      "sha256": "1d83585b97486319bb9c2fff2996c7435fd78e26e63e611aae2ad6791d35db6b"
+    },
+    "/tmp/stream-wave23-composition-cycle-trace-20261022/apple/build/composition-cycle-trace-source-freeze-v3-20261022/runner-syntax.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/tmp/stream-wave23-composition-cycle-trace-20261022/apple/build/composition-cycle-trace-source-freeze-v3-20261022/generation.log": {
+      "bytes": 132,
+      "sha256": "b10ca91554ab098420dbc50283b282c9866af0d6cdb56f5c9d7185326dd2f0c1"
+    }
+  }
+}
