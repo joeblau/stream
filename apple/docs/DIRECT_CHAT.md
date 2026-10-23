@@ -129,3 +129,19 @@ workspaces. Identity verification is also fenced by workspace intent and an
 attempt token, so a late superseded verification cannot replace a newer pin.
 The two-session fixture uses one controlled vault and transport; it establishes
 no real OAuth grant or authorized audience feed.
+
+
+The 2026-10-22 hosted reconnect-fixture failure used a stale cumulative count
+after the fifth public EventSub subscription was added. The reader creates five
+subscriptions on its first socket, transfers them without new subscriptions
+during migration, then creates five on a fresh reconnect. The fixture now
+checks exactly those independent type sets and each request's version, owner,
+user and WebSocket session, without requiring request order. Shipping behavior
+and the original fixture deadlines and other assertions are unchanged.
+
+[The dated regression receipt](DIRECT_CHAT_RECONNECT_FIXTURE_2026-10-22.json)
+preserves the original hosted log, a reproduced old-fixture failure, a full
+corrected pass, a one-type omission control, and a separately authorized full
+pass of the final reviewed count/set helper. It labels the intermediate helper
+version explicitly. All76 current Core sources matched the reused framework's
+receipt; no Core rebuild, live provider operation or new hosted result is claimed.
