@@ -26,7 +26,7 @@ target=spec['targets'].delete('StreamMac')
 target['type']='tool'
 target['settings'] ||= {}
 target['settings']['base'] ||= {}
-target['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']='$(inherited) STREAM_NATIVE_VALIDATION'
+target['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']='$(inherited) STREAM_NATIVE_VALIDATION STREAM_SHARED_ENCODER_STOP_DIAGNOSTICS'
 target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift','DestinationOutputController.swift']}
 target['sources'] << File.join(root,folder,'stop-diagnostics/DestinationOutputController.swift')
 target['sources'] << File.join(root,'scripts/SharedEncoderStopDiagnostics.swift')
