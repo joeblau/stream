@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import SwiftUI
+import CryptoKit
 
 @MainActor private final class SelectionReceipt: ObservableObject {
     @Published var selected = 1
@@ -224,6 +225,165 @@ private enum OwnedCAX {
         }.value
     }
 }
+// Fixture-only LaunchServices bootstrap. No view/window, action, focus request or
+// activation occurs here. The original run() starts only after exact-owner ACK.
+@MainActor private enum OwnedLaunchBootstrap {
+    private struct Message: Codable, Equatable {
+        let schema: Int
+        let nonce: String
+        let pid: Int32
+        let bundleURL: String
+        let executableURL: String
+        let sourceSHA256: String
+        let binarySHA256: String
+        let deadlineUptimeNanoseconds: String
+        var phase: String
+        var monitorArmed: Bool?
+        var oracleExitCode: Int32?
+        var reason: String?
+
+        func sameIdentity(as other: Message) -> Bool {
+            schema == other.schema && nonce == other.nonce && pid == other.pid
+                && bundleURL == other.bundleURL && executableURL == other.executableURL
+                && sourceSHA256 == other.sourceSHA256 && binarySHA256 == other.binarySHA256
+                && deadlineUptimeNanoseconds == other.deadlineUptimeNanoseconds
+        }
+    }
+    private struct Context {
+        let identity: Message
+        let ready: URL
+        let ack: URL
+        let terminal: URL
+        let deadline: UInt64
+
+        func publish(_ message: Message, to url: URL) throws {
+            guard !FileManager.default.fileExists(atPath: url.path) else { throw Refusal.invalidProtocol }
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            try encoder.encode(message).write(to: url, options: .atomic)
+            let file = try FileHandle(forWritingTo: url)
+            defer { try? file.close() }
+            try file.synchronize()
+        }
+        func terminalResult(_ code: Int32, phase: String, reason: String? = nil) -> Bool {
+            var message = identity; message.phase = phase
+            message.oracleExitCode = code; message.reason = reason
+            do { try publish(message, to: terminal); return true }
+            catch { print("UNQUALIFIED: owned launch terminal receipt could not be published."); return false }
+        }
+    }
+    private enum Refusal: Error { case invalidProtocol }
+    private static func canonical(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
+    }
+    private static func argument(_ flag: String) throws -> String {
+        let arguments = CommandLine.arguments
+        let matches = arguments.indices.filter { arguments[$0] == flag }
+        guard matches.count == 1, let index = matches.first, index + 1 < arguments.count,
+              !arguments[index + 1].hasPrefix("--") else { throw Refusal.invalidProtocol }
+        return arguments[index + 1]
+    }
+    private static func digestIsValid(_ value: String) -> Bool {
+        value.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+    }
+    private static func context() throws -> Context {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["GITHUB_ACTIONS"] == "true",
+              environment["RUNNER_ENVIRONMENT"] == "github-hosted",
+              Bundle.main.bundleIdentifier == "com.stream.owned.scene-semantic-baseline.wave18",
+              NSApp.activationPolicy() == .regular,
+              CommandLine.arguments.contains("--owned-keyboard-setup"),
+              CommandLine.arguments.contains("--public-cax-child"),
+              !CommandLine.arguments.contains("--public-cax-self"),
+              !CommandLine.arguments.contains("--public-cax-raw-child"),
+              let artifacts = environment["STREAM_SCENE_SEMANTIC_ARTIFACTS"],
+              artifacts.hasPrefix("/") else { throw Refusal.invalidProtocol }
+        let nonce = try argument("--owned-launch-nonce")
+        guard let uuid = UUID(uuidString: nonce), uuid.uuidString.lowercased() == nonce else { throw Refusal.invalidProtocol }
+        let source = try argument("--owned-launch-source-sha256")
+        guard digestIsValid(source) else { throw Refusal.invalidProtocol }
+        let rawDeadline = try argument("--owned-launch-deadline-uptime-ns")
+        guard let deadline = UInt64(rawDeadline), String(deadline) == rawDeadline else { throw Refusal.invalidProtocol }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard deadline > now, deadline - now <= 30_000_000_000 else { throw Refusal.invalidProtocol }
+        let folder = canonical(URL(fileURLWithPath: artifacts, isDirectory: true))
+        guard try folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { throw Refusal.invalidProtocol }
+        let paths = try ["--owned-launch-ready", "--owned-launch-ack", "--owned-launch-terminal"].map {
+            let path = try argument($0)
+            guard path.hasPrefix("/") else { throw Refusal.invalidProtocol }
+            let url = canonical(URL(fileURLWithPath: path))
+            guard url.deletingLastPathComponent() == folder,
+                  !FileManager.default.fileExists(atPath: url.path) else { throw Refusal.invalidProtocol }
+            return url
+        }
+        guard Set(paths).count == 3, let executable = Bundle.main.executableURL else { throw Refusal.invalidProtocol }
+        let ownBundle = canonical(Bundle.main.bundleURL), ownExecutable = canonical(executable)
+        guard ownExecutable == ownBundle.appendingPathComponent("Contents/MacOS/harness") else { throw Refusal.invalidProtocol }
+        let binary = SHA256.hash(data: try Data(contentsOf: ownExecutable, options: .mappedIfSafe))
+            .map { String(format: "%02x", $0) }.joined()
+        guard DispatchTime.now().uptimeNanoseconds < deadline else { throw Refusal.invalidProtocol }
+        let identity = Message(schema: 1, nonce: nonce, pid: getpid(), bundleURL: ownBundle.absoluteString,
+            executableURL: ownExecutable.absoluteString, sourceSHA256: source, binarySHA256: binary,
+            deadlineUptimeNanoseconds: rawDeadline, phase: "ready")
+        return Context(identity: identity, ready: paths[0], ack: paths[1], terminal: paths[2], deadline: deadline)
+    }
+    static func execute() async -> Int32 {
+        let context: Context
+        do { context = try self.context() }
+        catch {
+            print("UNQUALIFIED: owned LaunchServices bootstrap guard, identity, path or original deadline was unavailable; no oracle entered.")
+            return 77
+        }
+        // This deadline is supplied before launch, never reset by late startup.
+        // Awaiting sleep leaves the main event loop available throughout bootstrap/run.
+        let watchdog = Task { @MainActor in
+            let now = DispatchTime.now().uptimeNanoseconds
+            if now < context.deadline {
+                do { try await Task.sleep(nanoseconds: context.deadline - now) }
+                catch { return }
+            }
+            print("UNQUALIFIED: original owned launch runtime deadline expired.")
+            _ = context.terminalResult(77, phase: "deadline", reason: "original-runtime-deadline")
+            exit(77)
+        }
+        defer { watchdog.cancel() }
+        do { try context.publish(context.identity, to: context.ready) }
+        catch {
+            _ = context.terminalResult(77, phase: "bootstrap", reason: "ready-write-failed")
+            return 77
+        }
+        let ackDeadline = min(context.deadline, DispatchTime.now().uptimeNanoseconds + 2_000_000_000)
+        var acknowledged = false
+        while DispatchTime.now().uptimeNanoseconds < ackDeadline {
+            if FileManager.default.fileExists(atPath: context.ack.path) {
+                do {
+                    let values = try context.ack.resourceValues(forKeys: [.fileSizeKey])
+                    guard let size = values.fileSize, size > 0, size <= 16_384 else { throw Refusal.invalidProtocol }
+                    let ack = try JSONDecoder().decode(Message.self, from: Data(contentsOf: context.ack))
+                    acknowledged = ack.sameIdentity(as: context.identity) && ack.phase == "ack"
+                        && ack.monitorArmed == true && ack.oracleExitCode == nil
+                        && DispatchTime.now().uptimeNanoseconds < ackDeadline
+                } catch { acknowledged = false }
+                break // A malformed/mismatched ACK never becomes a retry or fallback.
+            }
+            do { try await Task.sleep(nanoseconds: 10_000_000) }
+            catch { break }
+        }
+        guard acknowledged, DispatchTime.now().uptimeNanoseconds < context.deadline else {
+            print("UNQUALIFIED: exact owned native exit monitor ACK was not observed before bootstrap deadline; no oracle entered.")
+            _ = context.terminalResult(77, phase: "bootstrap", reason: "monitor-ack-unavailable")
+            return 77
+        }
+        // The handshake has no control/action effects. Existing AX baselines,
+        // activation eligibility, stock key calibration and product oracles follow.
+        let result = await SceneSelectionNativeHarness.run()
+        guard DispatchTime.now().uptimeNanoseconds < context.deadline else {
+            _ = context.terminalResult(77, phase: "deadline", reason: "original-runtime-deadline")
+            return 77
+        }
+        guard context.terminalResult(result, phase: "oracle") else { return 77 }
+        return result
+    }
+}
 @main @MainActor struct SceneSelectionNativeHarness {
     static func key(_ window: NSWindow, _ text: String, code: UInt16) {
         for type in [NSEvent.EventType.keyDown, .keyUp] {
@@ -238,7 +398,12 @@ private enum OwnedCAX {
         if CommandLine.arguments.dropFirst().first == "--owned-cax-client" { OwnedCAX.runChild(); return }
         setbuf(stdout,nil)
         let app = NSApplication.shared; app.setActivationPolicy(.regular); app.finishLaunching()
-        Task { @MainActor in exit(await run()) }; app.run()
+        if CommandLine.arguments.contains("--owned-launchservices-bootstrap") {
+            Task { @MainActor in exit(await OwnedLaunchBootstrap.execute()) }
+        } else {
+            Task { @MainActor in exit(await run()) }
+        }
+        app.run()
     }
     static func run() async -> Int32 {
         let ownedKeyboardSetup = CommandLine.arguments.contains("--owned-keyboard-setup")
