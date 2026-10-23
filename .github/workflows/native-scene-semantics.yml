@@ -39,7 +39,7 @@ jobs:
           # Explicit hosted-only setup requests one activation of the owned app,
           # calibrates two genuine stock SwiftUI buttons, then preserves the
           # production Space/Tab/Space oracle. No retry, trust request or HID.
-          zsh scripts/run_scene_selection_native_harness.zsh --owned-bundle --public-cax-child --owned-keyboard-setup
+          zsh scripts/run_scene_selection_native_harness.zsh --owned-launchservices --owned-bundle --public-cax-child --owned-keyboard-setup
       - name: Retain first scene semantic outcome
         if: always()
         uses: actions/upload-artifact@v4
