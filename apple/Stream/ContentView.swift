@@ -1,6 +1,7 @@
 import SwiftUI
 import StreamCore
 import WebKit
+import CoreImage.CIFilterBuiltins
 
 /// An external mic that arrived mid-session — a Bluetooth device that paired or a
 /// USB-C receiver that was plugged in — backing the transient "connected" banner.
@@ -54,6 +55,9 @@ struct ContentView: View {
 
     @State private var showingSettings = false
 
+    /// Drives the toolbar popover that shows the bloxwap.app QR code and link.
+    @State private var showingBloxwapQR = false
+
     /// Coalesces rapid UI edits and performs Keychain/file writes away from the
     /// main actor. Text fields and sliders can update dozens of times per second;
     /// synchronously persisting each intermediate value made sheet navigation and
@@ -78,7 +82,11 @@ struct ContentView: View {
     @State private var isPIPPreviewReady = false
 
     init() {
-        let loaded = SettingsStore().load()
+        var loaded = SettingsStore().load()
+        // Launch always opens on the front camera. A flip still applies to the
+        // live session immediately, but the back-camera choice isn't restored
+        // on the next cold start.
+        loaded.cameraPosition = .front
         _settings = State(initialValue: loaded)
         _settingsPersistence = State(
             initialValue: SettingsPersistenceCoordinator(initialSettings: loaded)
@@ -214,6 +222,21 @@ struct ContentView: View {
                                 Image(systemName: "gearshape")
                             }
                             .accessibilityLabel("Settings")
+                        }
+                        // Shares the settings button's capsule; the spacer below
+                        // keeps the camera toggle in its own group.
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button {
+                                Haptics.tap()
+                                showingBloxwapQR = true
+                            } label: {
+                                Image(systemName: "qrcode")
+                            }
+                            .accessibilityLabel("Bloxwap QR code")
+                            .popover(isPresented: $showingBloxwapQR) {
+                                BloxwapQRPopover()
+                                    .presentationCompactAdaptation(.popover)
+                            }
                         }
                         ToolbarSpacer(.fixed, placement: .topBarLeading)
                         ToolbarItem(placement: .topBarLeading) {
@@ -507,10 +530,54 @@ struct ContentView: View {
     }
 }
 
+/// Toolbar popover content: a scannable QR code for bloxwap.app plus a tappable
+/// link, so someone nearby can open the site on their own device.
+private struct BloxwapQRPopover: View {
+    static let url = URL(string: "https://bloxwap.app")!
+
+    /// Rendered once — the URL never changes, so there's no reason to rebuild
+    /// the CoreImage pipeline every time the popover opens.
+    private static let qrImage: UIImage? = {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(url.absoluteString.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage,
+              let cgImage = CIContext().createCGImage(output, from: output.extent)
+        else { return nil }
+        return UIImage(cgImage: cgImage)
+    }()
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Bloxwap")
+                .font(.headline)
+
+            if let qrImage = Self.qrImage {
+                Image(uiImage: qrImage)
+                    // Nearest-neighbour scaling keeps the modules crisp.
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 200, height: 200)
+                    .padding(12)
+                    // Always dark-on-white so it scans in dark mode too.
+                    .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityLabel("QR code for bloxwap.app")
+            }
+
+            Link(destination: Self.url) {
+                Label("bloxwap.app", systemImage: "safari")
+                    .font(.subheadline.weight(.semibold))
+            }
+        }
+        .padding(20)
+    }
+}
+
 /// The second page in the root pager. The web view is created once and retains its
 /// navigation and scroll position while the user swipes back to the main screen.
 private struct BloxwapWebView: UIViewRepresentable {
-    private static let url = URL(string: "https://bloxwap.app")!
+    private static let url = BloxwapQRPopover.url
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
