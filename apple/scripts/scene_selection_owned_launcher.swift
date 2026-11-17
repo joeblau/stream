@@ -63,12 +63,14 @@ private final class OwnedExitMonitor {
         self.pid = pid
         descriptor = kqueue()
         guard descriptor >= 0 else { throw LaunchFailure(description: "kqueue failed errno \(errno)") }
-        var change = kevent(ident: UInt(pid), filter: Int16(EVFILT_PROC),
-            flags: UInt16(EV_ADD | EV_ENABLE | EV_ONESHOT | EV_RECEIPT),
-            fflags: UInt32(NOTE_EXIT | NOTE_EXITSTATUS), data: 0, udata: nil)
-        var receipt = kevent(), zero = timespec()
-        let count = Darwin.kevent(descriptor, &change, 1, &receipt, 1, &zero)
-        guard count == 1, receipt.ident == UInt(pid), receipt.filter == Int16(EVFILT_PROC),
+        var change = kevent64_s()
+        change.ident = UInt64(pid)
+        change.filter = Int16(EVFILT_PROC)
+        change.flags = UInt16(EV_ADD | EV_ENABLE | EV_ONESHOT | EV_RECEIPT)
+        change.fflags = UInt32(NOTE_EXIT) | UInt32(NOTE_EXITSTATUS)
+        var receipt = kevent64_s(), zero = timespec()
+        let count = kevent64(descriptor, &change, 1, &receipt, 1, 0, &zero)
+        guard count == 1, receipt.ident == UInt64(pid), receipt.filter == Int16(EVFILT_PROC),
               receipt.flags & UInt16(EV_ERROR) != 0, receipt.data == 0 else {
             close(descriptor); descriptor = -1
             throw LaunchFailure(description: "Exit monitor arm refused count=\(count) errno=\(errno) flags=\(receipt.flags) data=\(receipt.data)")
@@ -77,12 +79,12 @@ private final class OwnedExitMonitor {
     }
     deinit { if descriptor >= 0 { close(descriptor) } }
     func poll() throws -> NativeExit? {
-        var event = kevent(), zero = timespec()
-        let count = Darwin.kevent(descriptor, nil, 0, &event, 1, &zero)
+        var event = kevent64_s(), zero = timespec()
+        let count = kevent64(descriptor, nil, 0, &event, 1, 0, &zero)
         if count < 0 && errno == EINTR { return nil }
         try require(count >= 0, "Exit monitor read failed errno \(errno)")
         if count == 0 { return nil }
-        try require(count == 1 && event.ident == UInt(pid) && event.filter == Int16(EVFILT_PROC)
+        try require(count == 1 && event.ident == UInt64(pid) && event.filter == Int16(EVFILT_PROC)
             && event.flags & UInt16(EV_ERROR) == 0
             && event.fflags & UInt32(NOTE_EXIT) != 0 && event.fflags & UInt32(NOTE_EXITSTATUS) != 0
             && event.data >= 0 && event.data <= 65_535, "Missing/invalid owned native exit status")
@@ -169,7 +171,7 @@ private struct Options {
         try require([ready, ack, terminal].allSatisfy { !FileManager.default.fileExists(atPath: $0.path) }, "Stale handshake artifacts")
         try require(options.appArguments == ["--public-cax-child", "--owned-keyboard-setup"], "Unexpected oracle arguments")
         let env = ProcessInfo.processInfo.environment
-        try require(env["GITHUB_ACTIONS"] == "true" && env["RUNNER_ENVIRONMENT"] == "github-hosted", "Not actual hosted environment")
+        try require(env["GITHUB_ACTIONS"] == "true" && env["RUNNER_ENVIRONMENT"] == "self-hosted", "Not actual self-hosted environment")
     }
     private func capture(_ app: NSRunningApplication, ready object: [String: Any]? = nil) throws {
         let actualBinaryHash = try digest(executable)
@@ -280,20 +282,30 @@ private struct Options {
             && nativeExit?.normal == true && terminalVerified && terminated
         let success = resultVerified && nativeExit?.code == 0
         var report = identity
-        report.merge(["schema": 1, "nonce": nonce, "sourceSHA256": sourceHash, "binarySHA256": binaryHash,
-            "deadlineUptimeNanoseconds": String(deadline), "helperDeadlineUptimeNanoseconds": String(helperDeadline),
-            "callbackReceived": callbackReceived, "ownershipVerified": ownershipVerified,
-            "ownedLaunchDate": ownedLaunchDate.map { ISO8601DateFormatter().string(from: $0) as Any } ?? NSNull(), "statusObserved": nativeExit != nil,
-            "observedExitStatus": nativeExit.map { $0.normal ? $0.code as Any : NSNull() } ?? NSNull(),
-            "observedExitReason": nativeExit.map { $0.normal ? "normal" : "signal" } ?? "unknown",
-            "rawWaitStatus": nativeExit.map { $0.raw as Any } ?? NSNull(),
-            "nativeEventFlags": nativeExit.map { $0.flags as Any } ?? NSNull(),
-            "nativeEventNotes": nativeExit.map { $0.notes as Any } ?? NSNull(),
-            "terminalVerified": terminalVerified, "resultVerified": resultVerified,
-            "terminalOracleExitCode": terminalOracleCode.map { $0 as Any } ?? NSNull(),
-            "terminated": terminated, "cleanupRequested": cleanupRequested, "forceCleanupRequested": forceCleanupRequested,
-            "verifiedSuccess": success, "failure": failure ?? (resultVerified ? "" : "Missing native exit, terminal or termination proof"),
-            "scope": "Owned LaunchServices application only. Launch callback is not native exit. Missing ownership/status/termination remains unknown; no global app search or trust/input change."], uniquingKeysWith: { _, value in value })
+        report["schema"] = 1
+        report["nonce"] = nonce
+        report["sourceSHA256"] = sourceHash
+        report["binarySHA256"] = binaryHash
+        report["deadlineUptimeNanoseconds"] = String(deadline)
+        report["helperDeadlineUptimeNanoseconds"] = String(helperDeadline)
+        report["callbackReceived"] = callbackReceived
+        report["ownershipVerified"] = ownershipVerified
+        report["ownedLaunchDate"] = ownedLaunchDate.map { ISO8601DateFormatter().string(from: $0) as Any } ?? NSNull()
+        report["statusObserved"] = nativeExit != nil
+        report["observedExitStatus"] = nativeExit.map { $0.normal ? $0.code as Any : NSNull() } ?? NSNull()
+        report["observedExitReason"] = nativeExit.map { $0.normal ? "normal" : "signal" } ?? "unknown"
+        report["rawWaitStatus"] = nativeExit.map { $0.raw as Any } ?? NSNull()
+        report["nativeEventFlags"] = nativeExit.map { $0.flags as Any } ?? NSNull()
+        report["nativeEventNotes"] = nativeExit.map { $0.notes as Any } ?? NSNull()
+        report["terminalVerified"] = terminalVerified
+        report["resultVerified"] = resultVerified
+        report["terminalOracleExitCode"] = terminalOracleCode.map { $0 as Any } ?? NSNull()
+        report["terminated"] = terminated
+        report["cleanupRequested"] = cleanupRequested
+        report["forceCleanupRequested"] = forceCleanupRequested
+        report["verifiedSuccess"] = success
+        report["failure"] = failure ?? (resultVerified ? "" : "Missing native exit, terminal or termination proof")
+        report["scope"] = "Owned LaunchServices application only. Launch callback is not native exit. Missing ownership/status/termination remains unknown; no global app search or trust/input change."
         do { try writeJSON(report, artifacts.appendingPathComponent("launcher-receipt.json")) }
         catch { print("UNQUALIFIED: launcher receipt write failed: \(error)"); return 77 }
         print("Owned launcher verifiedSuccess=\(success), statusObserved=\(nativeExit != nil), terminated=\(terminated)")

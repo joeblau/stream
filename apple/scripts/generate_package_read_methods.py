@@ -55,12 +55,13 @@ def generate(folder, transaction=False):
         methods.append(slice_file(ws, start, end))
     if transaction:
         methods.append(slice_file(ws, "    func archive(_ id:", "    func addProfile(named"))
-    preview = "ShowPackageIO.preview(url)"
+    preview = "let result = await Task.detached { Result { try ShowPackageIO.preview(url) } }.value"
     bound = "ShowPackageIO.importFiles(from: preview.url, to: destination, previewedManifest: preview.manifest)"
     body = "".join(methods)
     if body.count(preview) != 1 or body.count(bound) != 1:
         raise ValueError("Actual manifest-bound IO boundary changed")
-    body = body.replace(preview, "PackageReadProbe.preview(url)").replace(bound, bound.replace("ShowPackageIO", "PackageReadProbe"))
+    body = body.replace(preview, "let result = await Task.detached { await PackageReadProbe.preview(url) }.value")
+    body = body.replace(bound, "await " + bound.replace("ShowPackageIO", "PackageReadProbe"))
     readback = "let readback = try? Data(contentsOf: catalogURL)"
     if body.count(readback) != 1:
         raise ValueError("Actual catalog readback boundary changed")
@@ -123,7 +124,7 @@ enum GuestFixtureStorage {
     receipt = dict(scope="Package IO and copied Workspace transactions only; no StudioRuntime/controller/recorder, UI, permissions, devices, preferences or network",
                    slices=records, generated={name: sha(value) for name, value in generated.items()},
                    harnessOmission="Only final full-runtime output predicate; original normal harness retains it",
-                   ioProbes="Actual IO, required previewedManifest forwarded unchanged; original NSCondition holds")
+                   ioProbes="Actual IO, required previewedManifest forwarded unchanged; bounded async completion holds")
     (folder / "generation.json").write_text(json.dumps(receipt, indent=2) + "\n")
     return receipt
 

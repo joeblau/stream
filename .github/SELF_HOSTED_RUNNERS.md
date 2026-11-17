@@ -66,3 +66,9 @@ See GitHub's [self-hosted runner routing documentation](https://docs.github.com/
 for label matching and runner registration guidance. Workflows inside the
 vendored `apple/Vendor/HaishinKit.swift` submodule belong to its upstream
 repository and are not executed as this repository's workflows.
+
+The owned scene LaunchServices diagnostic requires `GITHUB_ACTIONS=true` and
+`RUNNER_ENVIRONMENT=self-hosted` at all three entry points (shell runner, native
+launcher, and fixture app). Its identity, deadline, keyboard calibration, and
+native-exit checks remain mandatory. Historical hosted results in the scene
+protocol documents do not qualify the new self-hosted environment.

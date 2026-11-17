@@ -31,9 +31,9 @@ if owned_launchservices:
     # It cannot enable hosted activation for the historical direct mode.
     refusal=None
     if (sys.platform!='darwin' or os.environ.get('GITHUB_ACTIONS')!='true'
-        or os.environ.get('RUNNER_ENVIRONMENT')!='github-hosted' or not bundled
+        or os.environ.get('RUNNER_ENVIRONMENT')!='self-hosted' or not bundled
         or arguments!=['--public-cax-child','--owned-keyboard-setup']):
-        refusal='Owned Launch Services requires the exact owned bundle, hosted macOS and original own-parent C AX/keyboard flags'
+        refusal='Owned Launch Services requires the exact owned bundle, self-hosted macOS and original own-parent C AX/keyboard flags'
     clock=time.get_clock_info('monotonic')
     if sys.version_info<(3,10) or 'mach_absolute_time' not in clock.implementation:
         refusal='Owned Launch Services requires the documented shared macOS Mach uptime clock (Python 3.10+)'

@@ -288,7 +288,7 @@ private enum OwnedCAX {
     private static func context() throws -> Context {
         let environment = ProcessInfo.processInfo.environment
         guard environment["GITHUB_ACTIONS"] == "true",
-              environment["RUNNER_ENVIRONMENT"] == "github-hosted",
+              environment["RUNNER_ENVIRONMENT"] == "self-hosted",
               Bundle.main.bundleIdentifier == "com.stream.owned.scene-semantic-baseline.wave18",
               NSApp.activationPolicy() == .regular,
               CommandLine.arguments.contains("--owned-keyboard-setup"),
@@ -410,7 +410,7 @@ private enum OwnedCAX {
         if ownedKeyboardSetup {
             let environment = ProcessInfo.processInfo.environment
             guard environment["GITHUB_ACTIONS"] == "true",
-                  environment["RUNNER_ENVIRONMENT"] == "github-hosted",
+                  environment["RUNNER_ENVIRONMENT"] == "self-hosted",
                   Bundle.main.bundleIdentifier == "com.stream.owned.scene-semantic-baseline.wave18",
                   NSApp.activationPolicy() == .regular,
                   CommandLine.arguments.contains("--public-cax-child"),
@@ -627,7 +627,7 @@ private enum OwnedCAX {
         // This exact native object is queried directly. It is not inserted
         // into or substituted for SwiftUI's unavailable semantic subtree.
         if ownedKeyboardSetup {
-            print("SCOPE: hosted-only owned app activation and actual public owned C AX/local window key events; genuine stock keyboard calibration and unchanged scene oracle. No other app, global HID, settings/TCC/VoiceOver changes or full studio qualification.")
+            print("SCOPE: self-hosted-only owned app activation and actual public owned C AX/local window key events; genuine stock keyboard calibration and unchanged scene oracle. No other app, global HID, settings/TCC/VoiceOver changes or full studio qualification.")
         } else {
             print("SCOPE: actual mounted production SceneSelectionButton, own public in-process AX selectors/local window events only; no global activation/input/AX permissions, no VoiceOver or visual-contrast qualification")
         }

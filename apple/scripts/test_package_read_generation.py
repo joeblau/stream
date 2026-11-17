@@ -32,9 +32,10 @@ end
         workspace = (APPLE / "StreamMac/StudioWorkspace.swift").read_text()
         result = self.generate(workspace)
         self.assertEqual(result.returncode, 0, result.stderr)
-        expected = ("PackageReadProbe.importFiles(from: preview.url, to: destination, "
+        expected = ("await PackageReadProbe.importFiles(from: preview.url, to: destination, "
                     "previewedManifest: preview.manifest)")
         self.assertIn(expected, result.stdout)
+        self.assertIn("Task.detached { await PackageReadProbe.preview(url) }", result.stdout)
         self.assertNotIn("PackageReadProbe.importFiles(from: preview.url, to: destination)", result.stdout)
         self.assertIn("defer { PackageReadProbe.previewReturned(url) }", result.stdout)
 

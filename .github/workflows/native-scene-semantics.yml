@@ -36,7 +36,7 @@ jobs:
         run: |
           # The runner preserves genuine AppKit/SwiftUI baseline gates. Exit 77
           # means unavailable/unqualified; it is retained as a non-passing job.
-          # Explicit hosted-only setup requests one activation of the owned app,
+          # Explicit self-hosted-only setup requests one activation of the owned app,
           # calibrates two genuine stock SwiftUI buttons, then preserves the
           # production Space/Tab/Space oracle. No retry, trust request or HID.
           zsh scripts/run_scene_selection_native_harness.zsh --owned-launchservices --owned-bundle --public-cax-child --owned-keyboard-setup

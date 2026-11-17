@@ -89,7 +89,7 @@ copied verbatim; reaching the following save-panel boundary traps. Thus this
 qualifies rejection of export during an occupied import, not native panel use.
 
 The generated harness preserves every package/race/import/catalog assertion and
-the original bounded `NSCondition` completion holds. Its only omitted assertion
+the bounded async completion holds. Its only omitted assertion
 is the unrelated final runtime output predicate, replaced by the explicit line
 `StudioRuntime/controller/recorder not constructed; their behavior not tested`.
 The normal full-graph harness retains its real output predicate. No dummy runtime
