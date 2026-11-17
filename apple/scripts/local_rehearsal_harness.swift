@@ -386,8 +386,22 @@ private final class RehearsalMediaClock: @unchecked Sendable {
         try await ProgramRecordingFixtures.inspect(next, expectedDuration: nil, checkSync: false)
         print("PASS: actual shipping compositor/mixer H264/AAC rehearsal survives pause/resume, rotation and preview stop; all files decode and guard releases after writer/segment finalization")
 
+        if let count = ProcessInfo.processInfo.environment["REHEARSAL_RESTART_BURST"].flatMap(Int.init) {
+            for _ in 0..<max(0, min(64, count)) {
+                controller.startPreview()
+                controller.stopPreview()
+            }
+            trace("owned-preview-restart-burst")
+        }
         controller.beginLocalRehearsal(recorder: recorder)
-        try await wait("Storage-loss fixture did not start actual media", until: { recorder.state == .recording && recorder.progress.durationSeconds >= 0.5 })
+        trace("storage-restart-requested")
+        do {
+            try await wait("Storage-loss fixture did not start actual media", until: { recorder.state == .recording && recorder.progress.durationSeconds >= 0.5 })
+        } catch {
+            trace("storage-restart-failed")
+            print("TRACE storage-restart ownership: rehearsal=\(controller.isRehearsing), preview=\(controller.isPreviewing), reservations=\(controller.reservedRecordingEncoderCount), output=\(controller.outputSessionActive), error=\(recorder.lastError ?? "none"), warning=\(recorder.warning ?? "none")")
+            throw error
+        }
         trace("before-storage-relocation")
         let interrupted = recorder.currentOutputURL!
         let relocated = folder.appendingPathComponent("RemovedRecordingPath")

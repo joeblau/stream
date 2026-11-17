@@ -72,6 +72,13 @@ nonunity gain, mute persistence, resets, pruning, removed bindings and a truly
 unbound silent capture.
 Guest gains continue to require the full receive lease and explicit routing.
 
+The gain-only producer advances on its actual PCM sample count, with at most
+80 ms of lookahead. Its source PTS is independent of task wakeup or delivery
+time. Re-stamping each packet after a fixed sleep created real source gaps on
+both hosted Mac runners and diluted the gain RMS; the same gain thresholds now
+measure continuous owned input rather than scheduler-dependent silence. The
+later controller/renderer/recording phases keep their independent source clocks.
+
 Local qualification: Mac15,8 / Apple M3 Max, macOS 27.0.1 (26A434), Xcode 26.6
 (17F113). The final failover file decoded 310 frames over 10.33348 seconds; all 14
 painted windows and their Program audio policies passed, with both private

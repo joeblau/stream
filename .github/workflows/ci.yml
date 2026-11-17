@@ -184,6 +184,7 @@ jobs:
             apple/build/studio-deck-native-validation/artifacts-*
             apple/build/annotation-toolbar-layout.json
             apple/build/annotation-toolbar-layout
+            apple/build/local-rehearsal-validation/media-*
 
   test:
     name: StreamCore tests (iOS Simulator)
