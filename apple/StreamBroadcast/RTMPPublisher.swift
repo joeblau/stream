@@ -219,6 +219,8 @@ actor RTMPPublisher: Publisher {
     func start(_ settings: StreamSettings) async throws {
         encoderInputClock.reset()
         self.settings = settings
+        // Bind the lazy connection to this codec before the first suspension.
+        _ = connection
         await networkController.setExternalEncoding(encodedInput)
         await networkController.setProgramSourceFrameRate(programSourceFrameRate)
 
