@@ -15,10 +15,33 @@ private final class WriterReceipt: @unchecked Sendable {
     private let lock = NSLock()
     private var progress = ProgramRecordingSession.Progress()
     private var failure: String?
+    private let publication = DispatchSemaphore(value: 0)
+    private var publicationHeld = false, publicationReleased = false
     func receive(_ event: ProgramRecordingSession.Event) {
-        lock.lock(); defer { lock.unlock() }
-        if case .progress(let value) = event { progress = value }
+        lock.lock()
+        var hold = false
+        if case .progress(let value) = event {
+            progress = value
+            if !publicationHeld && value.durationSeconds >= 6.2 {
+                publicationHeld = true; hold = true
+            }
+        }
         if case .failed(let message) = event { failure = message }
+        lock.unlock()
+        // The shipping writer invokes progress before writing its journal.
+        // Hold that real dispatch-queue callback once so the stale-journal
+        // race remains reproducible without blocking the MainActor/executor.
+        if hold && publication.wait(timeout: .now() + 3) == .timedOut {
+            lock.lock(); failure = "Owned journal publication hold exceeded three seconds"; lock.unlock()
+        }
+    }
+    func isPublicationHeld() -> Bool {
+        lock.lock(); defer { lock.unlock() }; return publicationHeld && !publicationReleased
+    }
+    func releasePublication() {
+        lock.lock(); let release = publicationHeld && !publicationReleased
+        publicationReleased = true; lock.unlock()
+        if release { publication.signal() }
     }
     func read() -> (ProgramRecordingSession.Progress, String?) {
         lock.lock(); defer { lock.unlock() }; return (progress, failure)
@@ -146,8 +169,8 @@ private struct Ready: Codable {
                 session.appendVideo(try ProgramRecordingFixtures.video(at: elapsed, timestampBase: hostBase))
             }
         }
-        defer { audio.cancel(); video.cancel() }
-        var marked = false
+        defer { receipt.releasePublication(); audio.cancel(); video.cancel() }
+        var marked = false, qualifiedPublication = false
         for _ in 0..<1_600 {
             let (progress, failure) = receipt.read()
             try require(failure == nil, "Owned recorder failed before abrupt exit: \(failure ?? "")")
@@ -155,25 +178,36 @@ private struct Ready: Codable {
                 session.addMarker(title: "Before interruption")
                 marked = true
             }
-            if marked && progress.durationSeconds >= 6.2 && progress.videoSamples > 200 && progress.audioSamples > 500 {
+            if receipt.isPublicationHeld() && !qualifiedPublication {
                 await runtime.recoveryBinding?.refreshRecordings()
                 await workspace.recovery.flush()
-                // Writer progress can lead its periodic sidecar checkpoint.
-                // Kill only after the actual durable recovery document meets
-                // the unchanged parent assertions, rather than racing a stale
-                // status/duration/marker inventory on a busy hosted runner.
-                let checkpointURL = GuestFixtureStorage.machineDirectory
-                    .appendingPathComponent("SessionRecovery/current.v1.json")
-                let checkpoint = try SessionRecoveryDiskStore.read(checkpointURL)
-                guard checkpoint?.recordingWasActive == true,
-                      checkpoint?.recordingInventoryVerified == true,
-                      checkpoint?.recordings.contains(where: {
-                          $0.sessionID == sessionID && $0.file == output.lastPathComponent
-                              && $0.status == .recording && $0.duration > 6 && $0.markers.count == 1
-                      }) == true else {
-                    try await Task.sleep(for: .milliseconds(10))
-                    continue
+                let checkpointURL = GuestFixtureStorage.machineDirectory.appendingPathComponent("SessionRecovery/current.v1.json")
+                let saved = try JSONDecoder().decode(SessionRecoverySnapshot.self, from: Data(contentsOf: checkpointURL))
+                guard let persisted = saved.recordings.first(where: { $0.sessionID == sessionID }) else {
+                    throw NSError(domain: "AbruptSessionRecovery", code: 6,
+                        userInfo: [NSLocalizedDescriptionKey: "Held callback lost the actual preceding recorder inventory"])
                 }
+                try require(persisted.duration < progress.durationSeconds,
+                    "Held live progress did not precede the actual persisted recorder inventory")
+                print("PASS: held live progress \(progress.durationSeconds)s precedes actual journal/checkpoint \(persisted.duration)s; readiness remains withheld")
+                receipt.releasePublication(); qualifiedPublication = true
+                continue
+            }
+            if marked && qualifiedPublication && progress.durationSeconds >= 6.2 && progress.videoSamples > 200 && progress.audioSamples > 500 {
+                await runtime.recoveryBinding?.refreshRecordings()
+                // Actual writer progress can arrive before its atomic journal
+                // replacement. Retain the original >6 s/marker/status criteria
+                // and wait for those exact persisted bytes before SIGKILL.
+                await workspace.recovery.flush()
+                let checkpointURL = GuestFixtureStorage.machineDirectory.appendingPathComponent("SessionRecovery/current.v1.json")
+                let saved = try JSONDecoder().decode(SessionRecoverySnapshot.self, from: Data(contentsOf: checkpointURL))
+                guard saved.recordingWasActive, saved.recordingInventoryVerified,
+                      let segment = saved.recordings.first(where: { $0.sessionID == sessionID }),
+                      segment.file == output.lastPathComponent && segment.status == .recording
+                        && segment.duration > 6 && segment.markers.count == 1 else {
+                    try await Task.sleep(for: .milliseconds(10)); continue
+                }
+                print("Stage: actual persisted recording inventory ready at \(segment.duration)s with one timed marker")
                 let ready = Ready(childPID: getpid(), project: workspace.selection.project, profile: workspace.selection.profile,
                     session: sessionID, scene: scene.id.rawValue, layer: layer.id.rawValue,
                     media: media.id.rawValue,

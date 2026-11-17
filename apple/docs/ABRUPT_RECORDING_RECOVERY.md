@@ -5,7 +5,11 @@ Workspace, recovery binding/coordinator, Program writer and Recording Library in
 an owned command-line fixture. The parent launches a child instance, waits for
 actual H.264/AAC sample acceptance and flushed recorder/recovery journals, and
 sends `SIGKILL` only to that live child `Process` PID. The child never calls the
-writer's finish API or the clean-exit recovery hook.
+writer's finish API or the clean-exit recovery hook. Readiness checks the actual
+flushed recovery segment, including its original greater-than-six-second duration,
+recording status and timed marker. A bounded controlled hold of the shipping
+writer's progress callback proves that newer in-memory progress cannot announce
+readiness while the preceding atomic journal/checkpoint is still on disk.
 
 The shipping writer already sets `movieFragmentInterval` to two seconds. The
 fixture tests whether its finished fragments can actually be decoded after the
