@@ -41,14 +41,15 @@ replace_source(target, root, folder, 'StudioWorkspace.swift') do |source|
   last = source.index('    func importPreviewedPackage() async {', first)
   abort 'Package preview transaction boundary changed' unless first && last
   preview = source[first...last]
-  abort 'Actual preview IO boundary changed' unless preview.include?('ShowPackageIO.preview(url)')
-  preview.sub!('ShowPackageIO.preview(url)', 'PackageReadProbe.preview(url)')
+  seam = 'let result = await Task.detached { Result { try ShowPackageIO.preview(url) } }.value'
+  abort 'Actual preview IO boundary changed' unless preview.include?(seam)
+  preview.sub!(seam, 'let result = await Task.detached { await PackageReadProbe.preview(url) }.value')
   abort 'Actual preview completion boundary changed' unless preview.match?(/        Task \{[^\n]*\n/)
   preview.sub!(/        Task \{([^\n]*)\n/, "        Task {\\1\n            defer { PackageReadProbe.previewReturned(url) }\n")
   source[first...last] = preview
   seam = 'ShowPackageIO.importFiles(from: preview.url, to: destination, previewedManifest: preview.manifest)'
   abort 'Actual import IO boundary changed' unless source.include?(seam)
-  source = source.sub(seam, 'PackageReadProbe.importFiles(from: preview.url, to: destination, previewedManifest: preview.manifest)')
+  source = source.sub(seam, 'await PackageReadProbe.importFiles(from: preview.url, to: destination, previewedManifest: preview.manifest)')
   readback = 'let readback = try? Data(contentsOf: catalogURL)'
   abort 'Actual catalog readback boundary changed' unless source.scan(readback).length == 1
   source.sub(readback, 'let readback = try? PackageCatalogReadProbe.readback(catalogURL)')
@@ -85,7 +86,7 @@ python3 scripts/repair_desktop_transport_archives.py "$PACKAGE_READ_BUILD_PATH"
 xcodebuild -project "$PACKAGE_READ_DIR/PackageReadValidation.xcodeproj" -scheme PackageReadHarness \
   -destination 'platform=macOS' -derivedDataPath "$PACKAGE_READ_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
 readonly PACKAGE_READ_PRODUCTS="${PACKAGE_READ_BUILD_PATH:A}/Build/Products/Debug"
-env DYLD_FRAMEWORK_PATH="$PACKAGE_READ_PRODUCTS" python3 - "$PACKAGE_READ_PRODUCTS/PackageReadHarness" "${PACKAGE_READ_DIR:A}" <<'PY'
+env DYLD_FRAMEWORK_PATH="$PACKAGE_READ_PRODUCTS" LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 python3 - "$PACKAGE_READ_PRODUCTS/PackageReadHarness" "${PACKAGE_READ_DIR:A}" <<'PY'
 import pathlib,subprocess,sys,uuid
 folder=pathlib.Path(sys.argv[2])/('artifacts-'+str(uuid.uuid4()));folder.mkdir()
 try: raise SystemExit(subprocess.run([sys.argv[1],str(folder)],timeout=45).returncode)

@@ -166,13 +166,16 @@ struct PortableNativeReport: Codable {
                     do {
                         switch command.action {
                         case "inspect": break
-                        case "cancelPreview": workspace.importPreview = nil
+                        case "cancelPreview":
+                            workspace.importPreview = nil
+                            try await waitSheet(presented: false)
                         case "import": await workspace.importPreviewedPackage()
                         case "apply": await workspace.applyPending()
                         case "drop":
                             let source = try dropPackage(workspace, name: "Native Drop Show")
                             guard workspace.acceptPackageDrop([fileProvider(source)]) else { throw Failure.message("Shipping drop rejected a real NSItemProvider file URL") }
                             try await waitPreview(workspace, path: source.path)
+                            try await waitSheet(presented: true)
                         case "dropMixed":
                             let source = try dropPackage(workspace, name: "Native Mixed Drop Show")
                             let other = folder.appendingPathComponent("Not a show.txt")
@@ -292,6 +295,18 @@ struct PortableNativeReport: Codable {
             try? write(report(workspace, id: nil, phase: "failed", error: error.localizedDescription))
             NSApp.terminate(nil)
         }
+    }
+    static func waitSheet(presented: Bool) async throws {
+        // These wire commands otherwise outrun the shipping SwiftUI sheet's
+        // native dismissal. An old nil-binding callback can then cancel a new
+        // preview between its drop ACK and explicit import. Observe the actual
+        // presentation boundary before reporting the controlled gesture done.
+        for _ in 0..<300 {
+            if let studio = NSApp.windows.first(where: { $0.title == "Stream Studio" }),
+               (studio.attachedSheet != nil) == presented { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw Failure.message("Actual preview sheet transition exceeded three seconds")
     }
     static func waitPreview(_ workspace: StudioWorkspace, path: String) async throws {
         for _ in 0..<300 {

@@ -125,6 +125,12 @@ root=pathlib.Path(sys.argv[1])
 with (root/'sandbox.entitlements').open('wb') as f:
  plistlib.dump({'com.apple.security.app-sandbox':True,'com.apple.security.files.user-selected.read-write':True,'com.apple.security.files.bookmarks.app-scope':True},f)
 PY
+# Xcode may emit unsigned nested preview/debug dylibs, notably on Intel.
+# Sign each actual nested code object before the enclosing frameworks/app;
+# --deep verification must qualify the exact bundle, not hide missing code.
+while IFS= read -r library; do
+  codesign --force --sign - "$library"
+done < <(find "$PORTABLE_APP/Contents" -type f -name '*.dylib')
 if [[ -d "$PORTABLE_APP/Contents/Frameworks" ]]; then
   while IFS= read -r framework; do
     codesign --force --sign - "$framework"
