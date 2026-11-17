@@ -23,7 +23,7 @@ jobs:
             architecture: arm64
           - runner: macos-26-intel
             architecture: x86_64
-    runs-on: ${{ matrix.runner }}
+    runs-on: [self-hosted, macOS, "${{ matrix.runner }}"]
     # Fresh native Intel transport + app builds can exceed 35 minutes.
     # This bounds build/diagnostics/upload, not a longer sampling window.
     timeout-minutes: 90

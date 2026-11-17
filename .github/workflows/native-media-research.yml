@@ -20,7 +20,7 @@ concurrency:
 jobs:
   decoder:
     name: WebM and native controls (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, macOS, "${{ matrix.os }}"]
     timeout-minutes: 25
     strategy:
       fail-fast: false

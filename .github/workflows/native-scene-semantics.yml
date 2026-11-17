@@ -13,7 +13,7 @@ concurrency:
 jobs:
   owned-scene-baseline:
     name: Owned scene component baseline (macos-26)
-    runs-on: macos-26
+    runs-on: [self-hosted, macOS, ARM64, macos-26]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

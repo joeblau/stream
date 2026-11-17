@@ -26,7 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [macos-26, macos-26-intel]
-    runs-on: ${{ matrix.runner }}
+    runs-on: [self-hosted, macOS, "${{ matrix.runner }}"]
     # A fresh native Intel transport + app build can take over 35 minutes.
     # Reserve the full two 600-second windows plus finalization and upload.
     timeout-minutes: 90

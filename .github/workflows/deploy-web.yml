@@ -22,7 +22,7 @@ concurrency:
 jobs:
   web:
     name: Build and deploy blau-stream
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     defaults:
       run:

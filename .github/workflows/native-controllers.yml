@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   native-wire-tests:
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, macOS, "${{ matrix.os }}"]
     timeout-minutes: 10
     strategy:
       fail-fast: false

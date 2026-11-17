@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [macos-26, macos-26-intel]
-    runs-on: ${{ matrix.runner }}
+    runs-on: [self-hosted, macOS, "${{ matrix.runner }}"]
     defaults:
       run:
         working-directory: apple
@@ -187,7 +187,7 @@ jobs:
 
   test:
     name: StreamCore tests (iOS Simulator)
-    runs-on: macos-26
+    runs-on: [self-hosted, macOS, ARM64, macos-26]
     defaults:
       run:
         working-directory: apple
@@ -208,13 +208,9 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # The full Stream app requires the iOS 27 SDK (ScreenCaptureKit + the
-      # AVAudioInputNode throwing-tap API), which GitHub runners do not ship
-      # yet — the newest hosted Xcode (26.x) only carries the iOS 26 SDK. Until
-      # runners gain Xcode 27, CI validates the pure StreamCore logic and its
-      # test suite (both pinned to an iOS 18 floor in project.yml, so they build
-      # and run on the runner's iOS 26 simulators). The app itself is verified
-      # on a physical iOS 27 device.
+      # The full Stream app requires the iOS 27 SDK. This job validates
+      # StreamCore using the provisioned iPhone 17 simulator; install its
+      # runtime on the self-hosted runner. Full app validation remains separate.
       - name: Test StreamCore
         run: |
           xcodebuild test \

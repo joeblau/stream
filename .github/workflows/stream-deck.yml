@@ -22,7 +22,7 @@ concurrency:
 jobs:
   plugin:
     name: Native plugin build and protocol lifecycle
-    runs-on: macos-15
+    runs-on: [self-hosted, macOS, ARM64, macos-15]
     timeout-minutes: 15
     defaults:
       run:

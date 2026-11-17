@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   signaling:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 10
     defaults:
       run:
@@ -38,7 +38,7 @@ jobs:
       - run: npm test
       - run: npm run build
   browser:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 5
     defaults:
       run:
